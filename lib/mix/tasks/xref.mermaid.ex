@@ -135,15 +135,17 @@ defmodule Mix.Tasks.Xref.Mermaid do
         to: opts |> Keyword.get_values(:to) |> Enum.flat_map(&resolve!(project, &1))
       ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
 
-    selection = Selection.select(project, selection_opts)
-    if selection.files == %{}, do: Mix.raise("Nothing to draw")
-    Mermaid.write(project, selection, opts)
+    Mermaid.write(project, Selection.select(project, selection_opts), opts)
   end
 
   # Prefixes are compared with the paths `mix xref` gives, which are relative to the app's directory.
   defp relative_prefix!(prefix, project) do
-    relative = Path.relative_to(Path.expand(prefix), project.root)
-    relative = if String.ends_with?(prefix, "/"), do: relative <> "/", else: relative
+    # The app's directory itself (`.`) is the empty prefix, which every file starts with.
+    relative =
+      case Path.relative_to(Path.expand(prefix), project.root) do
+        "." -> ""
+        relative -> if String.ends_with?(prefix, "/"), do: relative <> "/", else: relative
+      end
 
     if not Enum.any?(Map.keys(project.file_edges), &String.starts_with?(&1, relative)) do
       Mix.raise("No file of the project starts with #{prefix}")

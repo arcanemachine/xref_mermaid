@@ -56,7 +56,9 @@ defmodule XrefMermaid.Project do
     {project, load_warnings(project, modules, length(beams))}
   end
 
-  defp load_warnings(project, modules, beam_count) do
+  @doc false
+  # Public for its tests: `modules` are all the modules read, out of `beam_count` beam files.
+  def load_warnings(project, modules, beam_count) do
     without_debug_info = beam_count - length(modules)
 
     unmatched =

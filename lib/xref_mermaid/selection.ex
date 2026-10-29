@@ -52,23 +52,14 @@ defmodule XrefMermaid.Selection do
         true
     end
 
+    depth = Keyword.get(opts, :depth, 3)
+
+    # The slice's own calls (and, with `incoming`, the calls into it) are one step from its functions.
     calls =
-      (one_hop(project.forward, slice_functions, keep?, :forward) ++
-         if(incoming?, do: one_hop(project.backward, slice_functions, keep?, :backward), else: []) ++
-         walk(
-           project.forward,
-           Keyword.get(opts, :from, []),
-           Keyword.get(opts, :depth, 3),
-           keep?,
-           :forward
-         ) ++
-         walk(
-           project.backward,
-           Keyword.get(opts, :to, []),
-           Keyword.get(opts, :depth, 3),
-           keep?,
-           :backward
-         ))
+      (walk(project.forward, slice_functions, 1, keep?, :forward) ++
+         if(incoming?, do: walk(project.backward, slice_functions, 1, keep?, :backward), else: []) ++
+         walk(project.forward, Keyword.get(opts, :from, []), depth, keep?, :forward) ++
+         walk(project.backward, Keyword.get(opts, :to, []), depth, keep?, :backward))
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -134,11 +125,8 @@ defmodule XrefMermaid.Selection do
     }
   end
 
-  # `edges` maps a key to the keys it leads to: callees (`:forward`) or callers (`:backward`). Both return calls as
-  # `{caller, callee}`.
-  defp one_hop(edges, seeds, keep?, direction), do: walk(edges, seeds, 1, keep?, direction)
-
-  # Breadth-first from `seeds`, `depth` steps; returns the calls taken, including those into keys already reached.
+  # Breadth-first from `seeds`, `depth` steps, over `edges`: a map from a key to its callees (`:forward`) or callers
+  # (`:backward`). Returns the calls taken as `{caller, callee}`, including those into keys already reached.
   defp walk(edges, seeds, depth, keep?, direction) do
     {taken, _seen, _frontier} =
       Enum.reduce(1..depth//1, {[], MapSet.new(seeds), seeds}, fn _, {taken, seen, frontier} ->

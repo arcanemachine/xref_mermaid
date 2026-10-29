@@ -17,10 +17,10 @@ defmodule XrefMermaid.Mermaid do
     * `:collapsed` - collapses every file
     * `:all_functions` - collapses the files outside the slice unless `:expanded` (their full function lists are
       long); otherwise every file is open
-
-  A file holding a start function (`from`/`to`) is never collapsed.
     * `:link` - a URL template for a `click` link on each function: `{path}` (absolute, URL-encoded) and `{line}`
     * `:legend` - adds a legend subgraph
+
+  A file holding a start function (`from`/`to`) is never collapsed.
   """
   def write(project, selection, opts \\ []) do
     files = selection.files |> Map.keys() |> Enum.sort()

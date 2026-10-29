@@ -81,6 +81,27 @@ defmodule XrefMermaid.ProjectTest do
            }
   end
 
+  test "load_warnings/3 counts modules without debug info and modules whose files xref doesn't list" do
+    project = TestProject.build([{A, "lib/a.ex", [], []}])
+
+    unlisted = %{
+      module: B,
+      file: "/project/elsewhere/b.ex",
+      impl?: false,
+      functions: [],
+      calls: []
+    }
+
+    listed = %{module: A, file: "/project/lib/a.ex", impl?: false, functions: [], calls: []}
+
+    assert Project.load_warnings(project, [listed], 1) == []
+
+    assert Project.load_warnings(project, [listed, unlisted], 4) == [
+             "2 compiled modules have no debug info, so their functions are missing",
+             "1 modules come from files that `mix xref` doesn't list, so their functions are missing"
+           ]
+  end
+
   test "parse_spec/1 reads functions as Elixir reads them" do
     assert Project.parse_spec("Shop.Orders.place/2") == {:ok, {Shop.Orders, :place, 2}}
     assert Project.parse_spec("Shop.Orders.valid?/1") == {:ok, {Shop.Orders, :valid?, 1}}

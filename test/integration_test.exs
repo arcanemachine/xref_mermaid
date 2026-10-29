@@ -77,6 +77,10 @@ defmodule XrefMermaid.IntegrationTest do
     {absolute, _log} = chart([Path.join(@fixture, "lib/sample/orders.ex")], context)
     assert dotted == relative
     assert absolute == relative
+
+    {whole, _log} = chart(["."], context)
+    {lib, _log} = chart(["lib/"], context)
+    assert whole == lib
   end
 
   test "follows calls from and to functions, through generated ones", context do
@@ -117,5 +121,12 @@ defmodule XrefMermaid.IntegrationTest do
 
     assert failure(["--from", "Sample.Orders.place", "--incoming"], context) =~
              "--incoming goes with path prefixes"
+  end
+
+  test "stops at an umbrella root", %{env: env} do
+    umbrella = Path.join(@root, "test/fixtures/umbrella")
+    {log, status} = mix(["xref.mermaid", "--overview", "-o", "x.mmd"], umbrella, env)
+    assert status != 0
+    assert log =~ "not from the umbrella root"
   end
 end
