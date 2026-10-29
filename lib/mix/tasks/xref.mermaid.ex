@@ -15,8 +15,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   These can be combined; the chart shows everything they reach.
 
-    * path prefixes (arguments) - every function in the files under them, the calls those make, and the files they
-      depend on
+    * path prefixes (arguments, relative to the app's directory) - every function in the files under them, the
+      calls those make, and the files they depend on
     * `--from MOD.FUN/ARITY` - the calls the function makes, followed `--depth` hops (repeatable; leave out
       `/ARITY` for every arity)
     * `--to MOD.FUN/ARITY` - the calls made to the function, followed `--depth` hops back (repeatable)
@@ -30,7 +30,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `-o`, `--output` - the file to write (required)
     * `--all-functions` - every function of every shown file, not just the ones calls reach (files outside the
       slice start collapsed)
-    * `--external` - also calls to modules outside the project, as leaves
+    * `--external` - also calls to Elixir modules outside the project, as leaves (not Erlang modules, `Kernel` or
+      `String.Chars`, which are mostly what Kernel's functions and string interpolation compile to)
     * `--expanded` / `--collapsed` - opens or collapses every file
     * `--link TEMPLATE` - makes each function a link: `{path}` (absolute) and `{line}`, e.g.
       `vscode://file{path}:{line}`
@@ -43,101 +44,121 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   alias XrefMermaid.{Mermaid, Project, Selection}
 
-  @switches [
-    output: :string,
-    from: :keep,
-    to: :keep,
-    depth: :integer,
-    incoming: :boolean,
-    overview: :boolean,
-    level: :integer,
-    all_functions: :boolean,
-    external: :boolean,
-    expanded: :boolean,
-    collapsed: :boolean,
-    link: :string,
-    legend: :boolean
-  ]
-
   @impl true
   def run(argv) do
-    {opts, prefixes} = OptionParser.parse!(argv, strict: @switches, aliases: [o: :output])
+    {opts, prefixes} =
+      OptionParser.parse!(argv,
+        strict: [
+          output: :string,
+          from: :keep,
+          to: :keep,
+          depth: :integer,
+          incoming: :boolean,
+          overview: :boolean,
+          level: :integer,
+          all_functions: :boolean,
+          external: :boolean,
+          expanded: :boolean,
+          collapsed: :boolean,
+          link: :string,
+          legend: :boolean
+        ],
+        aliases: [o: :output]
+      )
+
     output = opts[:output] || Mix.raise("Missing --output")
-    from = Keyword.get_values(opts, :from)
-    to = Keyword.get_values(opts, :to)
-
-    if opts[:expanded] && opts[:collapsed],
-      do: Mix.raise("Give --expanded or --collapsed, not both")
-
-    if !opts[:overview] and prefixes == [] and from == [] and to == [] do
-      Mix.raise("Give path prefixes, --from, --to or --overview")
-    end
+    check_options!(opts, prefixes)
 
     # Compiling the project prunes the code path, archives included, so this archive's modules load first.
     Application.load(:xref_mermaid)
     Code.ensure_all_loaded!(Application.spec(:xref_mermaid, :modules))
 
     {project, warnings} = Project.load()
-
-    text =
-      if opts[:overview] do
-        project |> Selection.overview(Keyword.get(opts, :level, 2)) |> Mermaid.write_overview()
-      else
-        selection =
-          Selection.select(project,
-            prefixes: prefixes,
-            from: Enum.flat_map(from, &resolve!(project, &1)),
-            to: Enum.flat_map(to, &resolve!(project, &1)),
-            depth: Keyword.get(opts, :depth, 3),
-            incoming: opts[:incoming],
-            all_functions: opts[:all_functions],
-            external: opts[:external]
-          )
-
-        Mermaid.write(project, selection, opts)
-      end
+    text = if opts[:overview], do: overview(project, opts), else: chart(project, prefixes, opts)
 
     File.write!(output, text)
-    Enum.each(warnings ++ size_warnings(text), &Mix.shell().error("warning: " <> &1))
+    Enum.each(warnings ++ Mermaid.limit_warnings(text), &Mix.shell().error("warning: " <> &1))
     Mix.shell().info("Wrote #{output}")
   end
 
+  defp check_options!(opts, prefixes) do
+    from_or_to? = Keyword.has_key?(opts, :from) or Keyword.has_key?(opts, :to)
+
+    cond do
+      opts[:expanded] && opts[:collapsed] ->
+        Mix.raise("Give --expanded or --collapsed, not both")
+
+      opts[:overview] && (prefixes != [] or from_or_to?) ->
+        Mix.raise("--overview draws the whole project; leave out path prefixes, --from and --to")
+
+      opts[:overview] &&
+          Enum.any?(
+            [:depth, :incoming, :all_functions, :external, :expanded, :collapsed, :link, :legend],
+            &Keyword.has_key?(opts, &1)
+          ) ->
+        Mix.raise("--overview takes only --level and --output")
+
+      !opts[:overview] and prefixes == [] and not from_or_to? ->
+        Mix.raise("Give path prefixes, --from, --to or --overview")
+
+      Keyword.has_key?(opts, :level) and !opts[:overview] ->
+        Mix.raise("--level goes with --overview")
+
+      Keyword.get(opts, :level, 1) < 1 ->
+        Mix.raise("--level must be 1 or more")
+
+      Keyword.has_key?(opts, :depth) and not from_or_to? ->
+        Mix.raise("--depth goes with --from or --to")
+
+      Keyword.get(opts, :depth, 0) < 0 ->
+        Mix.raise("--depth must be 0 or more")
+
+      opts[:incoming] && prefixes == [] ->
+        Mix.raise("--incoming goes with path prefixes")
+
+      true ->
+        :ok
+    end
+  end
+
+  defp overview(project, opts) do
+    project |> Selection.overview(Keyword.get(opts, :level, 2)) |> Mermaid.write_overview()
+  end
+
+  defp chart(project, prefixes, opts) do
+    prefixes = Enum.map(prefixes, &relative_prefix!(&1, project))
+
+    selection_opts =
+      [
+        prefixes: prefixes,
+        from: opts |> Keyword.get_values(:from) |> Enum.flat_map(&resolve!(project, &1)),
+        to: opts |> Keyword.get_values(:to) |> Enum.flat_map(&resolve!(project, &1))
+      ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
+
+    selection = Selection.select(project, selection_opts)
+    if selection.files == %{}, do: Mix.raise("Nothing to draw")
+    Mermaid.write(project, selection, opts)
+  end
+
+  # Prefixes are compared with the paths `mix xref` gives, which are relative to the app's directory.
+  defp relative_prefix!(prefix, project) do
+    relative = Path.relative_to(Path.expand(prefix), project.root)
+    relative = if String.ends_with?(prefix, "/"), do: relative <> "/", else: relative
+
+    if not Enum.any?(Map.keys(project.file_edges), &String.starts_with?(&1, relative)) do
+      Mix.raise("No file of the project starts with #{prefix}")
+    end
+
+    relative
+  end
+
   defp resolve!(project, spec) do
-    case Project.resolve(project, parse_spec!(spec)) do
-      {:ok, keys} -> keys
+    with {:ok, parsed} <- Project.parse_spec(spec),
+         {:ok, keys} <- Project.resolve(project, parsed) do
+      keys
+    else
+      :error -> Mix.raise("Can't read #{inspect(spec)}: give MOD.FUN/ARITY or MOD.FUN")
       {:error, message} -> Mix.raise(message)
     end
-  end
-
-  # Parsed as a capture so names like `valid?`, operators and nested modules read as Elixir reads them.
-  defp parse_spec!(spec) do
-    case Code.string_to_quoted("&" <> spec) do
-      {:ok, {:&, _, [{:/, _, [{{:., _, [module, name]}, _, []}, arity]}]}}
-      when is_integer(arity) ->
-        {module!(module, spec), name, arity}
-
-      {:ok, {:&, _, [{{:., _, [module, name]}, _, []}]}} ->
-        {module!(module, spec), name, nil}
-
-      _ ->
-        Mix.raise("Can't read #{inspect(spec)}: give MOD.FUN/ARITY or MOD.FUN")
-    end
-  end
-
-  defp module!({:__aliases__, _, parts}, _spec), do: Module.concat(parts)
-  defp module!(module, _spec) when is_atom(module), do: module
-  defp module!(_, spec), do: Mix.raise("Can't read the module in #{inspect(spec)}")
-
-  # Mermaid 12 refuses to draw a chart over these limits (`maxTextSize`, `maxEdges`), and a chart can't raise them.
-  defp size_warnings(text) do
-    edges = text |> String.split("\n") |> Enum.count(&String.contains?(&1, ["-->", ".->", "==>"]))
-
-    [
-      if(byte_size(text) > 50_000,
-        do: "the chart is #{byte_size(text)} characters; Mermaid draws at most 50000 by default"
-      ),
-      if(edges > 500, do: "the chart has #{edges} arrows; Mermaid draws at most 500 by default")
-    ]
-    |> Enum.reject(&is_nil/1)
   end
 end

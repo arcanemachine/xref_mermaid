@@ -5,6 +5,8 @@ defmodule XrefMermaid.Project do
   A function is known by its key, `{module, name, arity}` with the lowest arity of its definition, so a function with
   default arguments is one function. A call goes from a function key to a function key, or to
   `{:external, {module, name, arity}}` for a module outside the project.
+
+  `modules_in` maps each file to its modules, the main one (the shortest name) first.
   """
 
   alias XrefMermaid.{Beam, DotGraph}
@@ -14,6 +16,7 @@ defmodule XrefMermaid.Project do
             functions: %{},
             index: %{},
             modules: %{},
+            modules_in: %{},
             forward: %{},
             backward: %{}
 
@@ -48,7 +51,7 @@ defmodule XrefMermaid.Project do
       end
 
     beams = Path.wildcard(Path.join(Mix.Project.compile_path(), "*.beam"))
-    modules = beams |> Enum.map(&Beam.read/1) |> Enum.reject(&is_nil/1)
+    modules = beams |> Enum.map(&Beam.read(String.to_charlist(&1))) |> Enum.reject(&is_nil/1)
     project = new(file_edges, modules, root)
     {project, load_warnings(project, modules, length(beams))}
   end
@@ -80,6 +83,9 @@ defmodule XrefMermaid.Project do
   (from `XrefMermaid.Beam.read/1`, absolute paths).
   """
   def new(file_edges, modules, root) do
+    # A module left out below (its file isn't in the file graph) is still the project's, not external.
+    project_modules = MapSet.new(modules, & &1.module)
+
     modules =
       for module <- modules,
           file = Path.relative_to(module.file, root),
@@ -103,10 +109,9 @@ defmodule XrefMermaid.Project do
       for {_, module} <- modules,
           {{name, arity}, {callee_module, _, _} = callee} <- module.calls,
           target =
-            index[callee] || if(not Map.has_key?(modules, callee_module), do: {:external, callee}),
-          target,
+            index[callee] || if(callee_module not in project_modules, do: {:external, callee}),
           caller = index[{module.module, name, arity}],
-          caller && caller != target,
+          caller != target,
           uniq: true,
           do: {caller, target}
 
@@ -116,6 +121,13 @@ defmodule XrefMermaid.Project do
       functions: functions,
       index: index,
       modules: modules,
+      modules_in:
+        modules
+        |> Map.values()
+        |> Enum.group_by(& &1.file, & &1.module)
+        |> Map.new(fn {file, names} ->
+          {file, Enum.sort_by(names, &{String.length(inspect(&1)), &1})}
+        end),
       forward: Enum.group_by(calls, &elem(&1, 0), &elem(&1, 1)),
       backward: Enum.group_by(calls, &elem(&1, 1), &elem(&1, 0))
     }
@@ -147,6 +159,29 @@ defmodule XrefMermaid.Project do
       {:error, "No function #{wanted} in the project. Closest: #{Enum.join(suggestions, ", ")}"}
     end
   end
+
+  @doc """
+  Reads a function as written on the command line: `Mod.fun/arity`, or `Mod.fun` for every arity. Returns
+  `{:ok, {module, name, arity_or_nil}}` or `:error`.
+  """
+  def parse_spec(spec) do
+    # Read as a capture, so names like `valid?`, operators and nested modules read as Elixir reads them.
+    case Code.string_to_quoted("&" <> spec) do
+      {:ok, {:&, _, [{:/, _, [{{:., _, [module, name]}, _, []}, arity]}]}}
+      when is_integer(arity) ->
+        with {:ok, module} <- module(module), do: {:ok, {module, name, arity}}
+
+      {:ok, {:&, _, [{{:., _, [module, name]}, _, []}]}} ->
+        with {:ok, module} <- module(module), do: {:ok, {module, name, nil}}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp module({:__aliases__, _, parts}) when is_list(parts), do: {:ok, Module.concat(parts)}
+  defp module(module) when is_atom(module), do: {:ok, module}
+  defp module(_), do: :error
 
   defp format_spec({module, name, arity}) do
     "#{inspect(module)}.#{name}" <> if(arity, do: "/#{arity}", else: "")

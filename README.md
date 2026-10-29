@@ -27,23 +27,26 @@ mix xref.mermaid --overview --level 3 -o overview.mmd                   # the pr
 Path prefixes, `--from` and `--to` combine: the chart shows everything they reach.
 
 - Path prefixes (arguments): every function in the files whose paths start with one (the slice), the calls they
-  make, and the files the slice depends on.
+  make, and the files the slice depends on. A prefix is relative to the app's directory (`./lib/...` and absolute
+  paths work too); one that matches no file stops the task.
 - `--from MOD.FUN/ARITY`: the calls the function makes, followed `--depth` calls deep (default 3). Leave out
   `/ARITY` for every arity. Repeatable.
 - `--to MOD.FUN/ARITY`: the calls made to the function, followed `--depth` calls back. Repeatable.
 - `--incoming`: also the calls into the slice, and the files that depend on it.
 - `--overview`: instead, one node per directory `--level` deep (default 2: `lib/my_app/`), with an arrow per pair of
   directories labeled with the strongest dependency kind and the number of file dependencies. Files directly in a
-  shallower directory form their own node (`lib/my_app/*`).
+  shallower directory form their own node: at level 2, `lib/my_app.ex` is in `lib/*`.
 
 ### How to draw it
 
 - `-o`, `--output`: the file to write (required). Regenerating overwrites it.
 - `--all-functions`: every function of every shown file, not only the ones calls reach. Files outside the slice then
   start collapsed.
-- `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules and
-  `Kernel` are left out: most of those calls are what Kernel's functions compile to.
-- `--expanded` / `--collapsed`: opens or collapses every file.
+- `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules, `Kernel`
+  and `String.Chars` are left out: most of those calls are what Kernel's functions and string interpolation compile
+  to.
+- `--expanded` / `--collapsed`: opens or collapses every file (a file holding a `--from` or `--to` function always
+  stays open).
 - `--link TEMPLATE`: makes each function a link to its source; `{path}` is the absolute path and `{line}` the
   line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
   `securityLevel: "loose"` (its default, `"strict"`, turns them off, and a chart can't change it).
@@ -51,7 +54,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 
 ## Reading the chart
 
-- Each directory is a subgraph; each file is a subgraph of its functions, and the slice files are yellow.
+- Each directory is a subgraph; each file is a subgraph of its shown functions (a plain node when none is shown),
+  and the slice files are yellow.
 - A private function has a dashed border, a generated one (from `use` or another macro) is grey, and a `--from` or
   `--to` function has a red border.
 - A function with default arguments is one node (`place/1..2`). In a file with several modules, functions outside
@@ -73,6 +77,7 @@ What it can't see:
 
 - Calls through a variable (`apply/3`, `module.fun()`, a behaviour's or protocol's implementation called through the
   behaviour or protocol): the call stops at what the code names.
+- `super(...)` calls in an overridden function.
 - Macros: they are expanded before compiling, so a macro never has callers; its use shows as a compile dependency
   between files, and the code it expands to counts as the caller's.
 

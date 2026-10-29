@@ -18,84 +18,102 @@ defmodule XrefMermaid.Selection do
   kind}], starts: MapSet, externals: %{module => [key]}}`.
 
   Options: `prefixes`, `from`, `to`, `depth` (default 3), `incoming` (also the calls into the slice files and the
-  file dependencies on them), `all_functions`, `external` (also calls to modules outside the project, as leaves).
+  file dependencies on them), `all_functions`, `external` (also calls to Elixir modules outside the project, as
+  leaves).
   """
   def select(project, opts) do
     prefixes = Keyword.get(opts, :prefixes, [])
-    depth = Keyword.get(opts, :depth, 3)
-    in_slice? = fn file -> Enum.any?(prefixes, &String.starts_with?(file, &1)) end
+    starts = Keyword.get(opts, :from, []) ++ Keyword.get(opts, :to, [])
+    incoming? = opts[:incoming] == true
 
-    slice_files = project.file_edges |> Map.keys() |> Enum.filter(in_slice?) |> MapSet.new()
+    ## Seeds
+
+    slice_files =
+      for file <- Map.keys(project.file_edges),
+          Enum.any?(prefixes, &String.starts_with?(file, &1)),
+          into: MapSet.new(),
+          do: file
 
     slice_functions =
       for {key, function} <- project.functions,
           function.file in slice_files and not function.generated?,
           do: key
 
-    # Erlang modules and `Kernel` are left out of external calls: most are what Kernel's functions compile to.
+    ## Calls
+
+    # Erlang modules, `Kernel` and `String.Chars` are left out of external calls: most are what Kernel's functions
+    # and string interpolation compile to.
     keep? = fn
       {:external, {module, _, _}} ->
         opts[:external] == true and String.starts_with?(Atom.to_string(module), "Elixir.") and
-          module != Kernel
+          module not in [Kernel, String.Chars]
 
       _ ->
         true
     end
 
     calls =
-      Enum.uniq(
-        for(
-          caller <- slice_functions,
-          callee <- Map.get(project.forward, caller, []),
-          keep?.(callee),
-          do: {caller, callee}
-        ) ++
-          if(opts[:incoming],
-            do:
-              for(
-                callee <- slice_functions,
-                caller <- Map.get(project.backward, callee, []),
-                do: {caller, callee}
-              ),
-            else: []
-          ) ++
-          walk(project.forward, Keyword.get(opts, :from, []), depth, keep?) ++
-          (project.backward
-           |> walk(Keyword.get(opts, :to, []), depth, fn _ -> true end)
-           |> Enum.map(fn {callee, caller} -> {caller, callee} end))
-      )
+      (one_hop(project.forward, slice_functions, keep?, :forward) ++
+         if(incoming?, do: one_hop(project.backward, slice_functions, keep?, :backward), else: []) ++
+         walk(
+           project.forward,
+           Keyword.get(opts, :from, []),
+           Keyword.get(opts, :depth, 3),
+           keep?,
+           :forward
+         ) ++
+         walk(
+           project.backward,
+           Keyword.get(opts, :to, []),
+           Keyword.get(opts, :depth, 3),
+           keep?,
+           :backward
+         ))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    ## File dependencies that no drawn call explains
 
     file_of = fn key -> project.functions[key].file end
-    project_calls = Enum.reject(calls, &match?({_, {:external, _}}, &1))
 
     called_files =
-      MapSet.new(project_calls, fn {caller, callee} -> {file_of.(caller), file_of.(callee)} end)
+      for {caller, callee} <- calls,
+          not match?({:external, _}, callee),
+          into: MapSet.new(),
+          do: {file_of.(caller), file_of.(callee)}
 
     file_edges =
       for {source, sinks} <- project.file_edges,
           {sink, kind} <- sinks,
           source != sink,
-          source in slice_files or (opts[:incoming] == true and sink in slice_files),
+          source in slice_files or (incoming? and sink in slice_files),
           {source, sink} not in called_files,
           do: {source, sink, kind}
 
-    endpoints = calls |> Enum.flat_map(&Tuple.to_list/1) |> MapSet.new()
+    ## Shown functions
+
+    # The start functions are shown even when they make or get no drawn call.
+    endpoints =
+      calls |> Enum.flat_map(&Tuple.to_list/1) |> MapSet.new() |> MapSet.union(MapSet.new(starts))
+
+    project_endpoints = Enum.reject(endpoints, &match?({:external, _}, &1))
 
     shown_files =
       Enum.uniq(
         Enum.to_list(slice_files) ++
-          for(key <- endpoints, not match?({:external, _}, key), do: file_of.(key)) ++
+          Enum.map(project_endpoints, file_of) ++
           Enum.flat_map(file_edges, fn {source, sink, _} -> [source, sink] end)
       )
 
     functions_in = project.functions |> Map.values() |> Enum.group_by(& &1.file)
+    all_functions? = opts[:all_functions] == true
 
     files =
       for file <- shown_files, into: %{} do
         keys =
           for function <- Map.get(functions_in, file, []),
               function.key in endpoints or
-                (not function.generated? and (file in slice_files or opts[:all_functions] == true)),
+                (not function.generated? and (file in slice_files or all_functions?)),
               do: function.key
 
         {file, Enum.sort_by(keys, &{project.functions[&1].line, &1})}
@@ -109,15 +127,19 @@ defmodule XrefMermaid.Selection do
     %{
       files: files,
       slice_files: slice_files,
-      calls: Enum.sort(calls),
+      calls: calls,
       file_edges: Enum.sort(file_edges),
-      starts: MapSet.new(Keyword.get(opts, :from, []) ++ Keyword.get(opts, :to, [])),
+      starts: MapSet.new(starts),
       externals: externals
     }
   end
 
-  # Breadth-first from `seeds` over `edges` (a map from a key to the keys it leads to); returns the edges taken.
-  defp walk(edges, seeds, depth, keep?) do
+  # `edges` maps a key to the keys it leads to: callees (`:forward`) or callers (`:backward`). Both return calls as
+  # `{caller, callee}`.
+  defp one_hop(edges, seeds, keep?, direction), do: walk(edges, seeds, 1, keep?, direction)
+
+  # Breadth-first from `seeds`, `depth` steps; returns the calls taken, including those into keys already reached.
+  defp walk(edges, seeds, depth, keep?, direction) do
     {taken, _seen, _frontier} =
       Enum.reduce(1..depth//1, {[], MapSet.new(seeds), seeds}, fn _, {taken, seen, frontier} ->
         step = for from <- frontier, to <- Map.get(edges, from, []), keep?.(to), do: {from, to}
@@ -125,7 +147,9 @@ defmodule XrefMermaid.Selection do
         {taken ++ step, MapSet.union(seen, MapSet.new(next)), next}
       end)
 
-    taken
+    if direction == :forward,
+      do: taken,
+      else: Enum.map(taken, fn {callee, caller} -> {caller, callee} end)
   end
 
   @doc """
@@ -134,10 +158,12 @@ defmodule XrefMermaid.Selection do
   with the strongest kind among its file dependencies (compile, then export, then runtime) and their count.
   """
   def overview(project, level) do
-    # Files in a directory shallower than `level` form their own group, `dir/*`, apart from its subdirectories.
+    # Files in a directory shallower than `level` form their own group, `dir/*`, apart from its subdirectories;
+    # files at the root are `./*`.
     dir_of = fn file ->
-      parts = file |> Path.dirname() |> Path.split()
-      Path.join(Enum.take(parts, level)) <> if(length(parts) < level, do: "/*", else: "/")
+      parts = if Path.dirname(file) == ".", do: [], else: file |> Path.dirname() |> Path.split()
+      name = if parts == [], do: ".", else: parts |> Enum.take(level) |> Path.join()
+      name <> if(length(parts) < level, do: "/*", else: "/")
     end
 
     rank = %{"compile" => 3, "export" => 2, "runtime" => 1}

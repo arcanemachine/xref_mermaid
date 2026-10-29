@@ -95,6 +95,26 @@ defmodule XrefMermaid.BeamTest do
     assert module.calls == [{{:save, 1}, {BeamTest.Repo, :changeset, 1}}]
   end
 
+  test "keeps generated functions of one name and line apart when their arities differ" do
+    [_using, module] =
+      read("""
+      defmodule BeamTest.FetchGen do
+        defmacro __using__(_opts) do
+          quote do
+            def fetch(a), do: a
+            def fetch(a, b, c), do: {a, b, c}
+          end
+        end
+      end
+
+      defmodule BeamTest.Fetcher do
+        use BeamTest.FetchGen
+      end
+      """)
+
+    assert Enum.map(module.functions, &{&1.name, &1.arities}) == [{:fetch, [1]}, {:fetch, [3]}]
+  end
+
   test "marks protocol implementations" do
     modules =
       read("""

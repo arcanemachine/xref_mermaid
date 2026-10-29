@@ -124,6 +124,15 @@ defmodule XrefMermaid.SelectionTest do
            ]
   end
 
+  test "a start function is shown even without drawn calls", %{project: project} do
+    zero = Selection.select(project, from: [{Shop.Orders, :place, 1}], depth: 0)
+    assert zero.calls == []
+    assert zero.files == %{"lib/shop/orders.ex" => [{Shop.Orders, :place, 1}]}
+
+    leaf = Selection.select(project, from: [{Shop.Rules, :limit, 0}])
+    assert leaf.files == %{"lib/shop/rules.ex" => [{Shop.Rules, :limit, 0}]}
+  end
+
   test "`external` adds Elixir modules outside the project, but not Erlang modules", %{
     project: project
   } do
@@ -132,6 +141,18 @@ defmodule XrefMermaid.SelectionTest do
     assert selection.externals == %{Enum => [{:external, {Enum, :map, 2}}]}
     assert {{Shop.Orders, :place, 1}, {:external, {Enum, :map, 2}}} in selection.calls
     refute Enum.any?(selection.calls, &match?({_, {:external, {:erlang, _, _}}}, &1))
+  end
+
+  test "overview/2 groups files at the root as `./*`" do
+    project =
+      TestProject.build([{A, "a.ex", [], []}, {B, "lib/b.ex", [], []}], %{
+        "a.ex" => %{"lib/b.ex" => "export"}
+      })
+
+    assert Selection.overview(project, 2) == %{
+             dirs: ["./*", "lib/*"],
+             edges: [{"./*", "lib/*", "export", 1}]
+           }
   end
 
   test "overview/2 groups files into directories and sums their dependencies" do
@@ -152,6 +173,13 @@ defmodule XrefMermaid.SelectionTest do
           "lib/app/orders/b.ex" => %{"lib/app/rules/c.ex" => "compile"}
         }
       )
+
+    assert Selection.overview(project, 1) == %{
+             dirs: ["lib/"],
+             edges: []
+           }
+
+    assert Selection.overview(project, 5).dirs == ["lib/*", "lib/app/orders/*", "lib/app/rules/*"]
 
     assert Selection.overview(project, 3) == %{
              dirs: ["lib/*", "lib/app/orders/", "lib/app/rules/"],

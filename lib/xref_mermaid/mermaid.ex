@@ -17,6 +17,8 @@ defmodule XrefMermaid.Mermaid do
     * `:collapsed` - collapses every file
     * `:all_functions` - collapses the files outside the slice unless `:expanded` (their full function lists are
       long); otherwise every file is open
+
+  A file holding a start function (`from`/`to`) is never collapsed.
     * `:link` - a URL template for a `click` link on each function: `{path}` (absolute, URL-encoded) and `{line}`
     * `:legend` - adds a legend subgraph
   """
@@ -36,9 +38,14 @@ defmodule XrefMermaid.Mermaid do
           end)
       )
 
+    module_parts = Map.new(files, &{&1, module_parts(&1, project)})
+
     ids =
       unique_ids(
-        Enum.flat_map(files, &function_ids(&1, selection.files[&1], project, container_ids)) ++
+        Enum.flat_map(
+          files,
+          &function_ids(&1, selection.files[&1], project, module_parts[&1], container_ids)
+        ) ++
           for {module, keys} <- externals, {:external, {_, name, arity}} = key <- keys do
             {key, "#{container_ids[{:external_module, module}]}__#{clean(name)}_#{arity}"}
           end,
@@ -50,6 +57,7 @@ defmodule XrefMermaid.Mermaid do
       project: project,
       selection: selection,
       opts: opts,
+      module_parts: module_parts,
       children: Enum.group_by(dirs, &Path.dirname/1),
       files_in: Enum.group_by(files, &Path.dirname/1)
     }
@@ -67,6 +75,10 @@ defmodule XrefMermaid.Mermaid do
         "  #{ids[{:file, source}]} #{@file_arrows[kind]} #{kind} #{@arrow_ends[kind]} #{ids[{:file, sink}]}\n"
       end),
       if(opts[:legend], do: legend(), else: ""),
+      case Enum.filter(files, &(&1 in selection.slice_files)) do
+        [] -> ""
+        slice_files -> "  class #{Enum.map_join(slice_files, ",", &ids[{:file, &1}])} slice\n"
+      end,
       "  classDef slice fill:#ffe9a8,stroke:#b8860b\n",
       class_line(functions, &(&1.kind in [:defp, :defmacrop]), "private", ids),
       class_line(functions, & &1.generated?, "generated", ids),
@@ -79,6 +91,28 @@ defmodule XrefMermaid.Mermaid do
         else: ""
       )
     ])
+  end
+
+  @doc """
+  Returns warnings for a chart over Mermaid 12's default limits (`maxTextSize`, `maxEdges`), which make it refuse to
+  draw the chart; a chart can't raise them. The legend's arrows don't count.
+  """
+  def limit_warnings(text) do
+    edges =
+      text
+      |> String.split("\n")
+      |> Enum.count(
+        &(String.contains?(&1, ["-->", ".->", "==>"]) and not String.contains?(&1, "legend_"))
+      )
+
+    [
+      if(String.length(text) > 50_000,
+        do:
+          "the chart is #{String.length(text)} characters; Mermaid draws at most 50000 by default"
+      ),
+      if(edges > 500, do: "the chart has #{edges} arrows; Mermaid draws at most 500 by default")
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """
@@ -118,11 +152,12 @@ defmodule XrefMermaid.Mermaid do
     file_id = ids[{:file, file}]
     slice? = file in selection.slice_files
     keys = selection.files[file]
-    prefixes = module_prefixes(file, context.project)
+    parts = context.module_parts[file]
 
     collapsed? =
       cond do
         opts[:expanded] -> false
+        Enum.any?(keys, &(&1 in selection.starts)) -> false
         opts[:collapsed] -> true
         opts[:all_functions] -> not slice?
         true -> false
@@ -130,18 +165,18 @@ defmodule XrefMermaid.Mermaid do
 
     # A file without shown functions stays a plain node: Mermaid can't draw an empty subgraph.
     if keys == [] do
-      ~s(#{pad}#{file_id}["#{escape(Path.basename(file))}"]#{if slice?, do: ":::slice"}\n)
+      ~s(#{pad}#{file_id}["#{escape(Path.basename(file))}"]\n)
     else
       [
         ~s(#{pad}subgraph #{file_id} ["#{escape(Path.basename(file))}"]\n),
         Enum.map(keys, fn key ->
           function = context.project.functions[key]
-          label = "#{prefixes[function.module]}#{function.name}/#{arities(function)}"
+          {label_prefix, _} = parts[function.module]
+          label = "#{label_prefix}#{function.name}/#{arities(function)}"
           ~s(#{pad}  #{ids[key]}["#{escape(label)}"]\n)
         end),
         "#{pad}end\n",
-        if(collapsed?, do: "#{pad}#{file_id}@{ view: collapsed }\n", else: ""),
-        if(slice?, do: "#{pad}style #{file_id} fill:#ffe9a8,stroke:#b8860b\n", else: "")
+        if(collapsed?, do: "#{pad}#{file_id}@{ view: collapsed }\n", else: "")
       ]
     end
   end
@@ -165,64 +200,42 @@ defmodule XrefMermaid.Mermaid do
     ]
   end
 
-  defp function_ids(file, keys, project, container_ids) do
-    prefixes = module_prefixes(file, project)
-
+  defp function_ids(file, keys, project, parts, container_ids) do
     for key <- keys do
       function = project.functions[key]
-
-      # `[impl String.Chars] ` becomes `impl_String_Chars__`, `Line.` becomes `Line__`.
-      module_part =
-        case prefixes[function.module] do
-          "" ->
-            ""
-
-          prefix ->
-            (prefix
-             |> String.replace(["[", "]"], "")
-             |> String.trim()
-             |> String.trim_trailing(".")
-             |> clean()) <> "__"
-        end
+      {_, id_part} = parts[function.module]
 
       {key,
-       "#{container_ids[{:file, file}]}__#{module_part}#{clean(function.name)}_#{hd(function.arities)}"}
+       "#{container_ids[{:file, file}]}__#{id_part}#{clean(function.name)}_#{hd(function.arities)}"}
     end
   end
 
-  # In a file with several modules, functions outside the file's main module (the one with the shortest name) are
-  # labeled with their module relative to it, or as the protocol implementation they are.
-  defp module_prefixes(file, project) do
-    modules = for {name, module} <- project.modules, module.file == file, do: {name, module}
+  # Returns `%{module => {label_prefix, id_part}}` for a file's modules. Functions outside the file's main module
+  # are labeled with their module relative to it (`Line.`), or as the protocol implementation they are
+  # (`[impl String.Chars] `).
+  defp module_parts(file, project) do
+    [main | others] = Map.get(project.modules_in, file, [nil])
+    main_name = inspect(main)
 
-    case Enum.min_by(modules, fn {name, _} -> String.length(inspect(name)) end, fn -> nil end) do
-      {main, _} when length(modules) > 1 ->
-        main_name = inspect(main)
+    Map.new(
+      [{main, {"", ""}}] ++
+        for module <- others do
+          name = inspect(module)
 
-        Map.new(modules, fn {name, module} ->
-          name_string = inspect(name)
+          cond do
+            project.modules[module].impl? ->
+              protocol = String.replace_suffix(name, "." <> main_name, "")
+              {module, {"[impl #{protocol}] ", "impl_#{clean(protocol)}__"}}
 
-          prefix =
-            cond do
-              name == main ->
-                ""
+            String.starts_with?(name, main_name <> ".") ->
+              relative = String.replace_prefix(name, main_name <> ".", "")
+              {module, {relative <> ".", clean(relative) <> "__"}}
 
-              module.impl? ->
-                "[impl #{String.replace_suffix(name_string, "." <> main_name, "")}] "
-
-              String.starts_with?(name_string, main_name <> ".") ->
-                String.replace_prefix(name_string, main_name <> ".", "") <> "."
-
-              true ->
-                name_string <> "."
-            end
-
-          {name, prefix}
-        end)
-
-      _ ->
-        Map.new(modules, fn {name, _} -> {name, ""} end)
-    end
+            true ->
+              {module, {name <> ".", clean(name) <> "__"}}
+          end
+        end
+    )
   end
 
   defp arities(%{arities: [arity]}), do: "#{arity}"
@@ -236,12 +249,16 @@ defmodule XrefMermaid.Mermaid do
   end
 
   defp link_line(function, ids, project, template) do
+    # Every reserved character but `/` is encoded, so a `#` or `?` in a path stays part of it.
+    path =
+      URI.encode(Path.join(project.root, function.file), &(URI.char_unreserved?(&1) or &1 == ?/))
+
     url =
       template
-      |> String.replace("{path}", URI.encode(Path.join(project.root, function.file)))
+      |> String.replace("{path}", path)
       |> String.replace("{line}", to_string(function.line))
 
-    ~s(  click #{ids[function.key]} href "#{String.replace(url, "\"", "%22")}"\n)
+    ~s(  click #{ids[function.key]} href "#{url}"\n)
   end
 
   defp legend do
@@ -251,6 +268,7 @@ defmodule XrefMermaid.Mermaid do
         legend_private["private function"]:::private
         legend_generated["generated function"]:::generated
         legend_start["start function"]:::start
+        legend_slice["file of the slice"]:::slice
         legend_caller["caller"] --> legend_called["called"]
         legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
       end
@@ -274,12 +292,7 @@ defmodule XrefMermaid.Mermaid do
     end)
   end
 
-  defp strip(path, shared) do
-    case Path.split(path) |> Enum.drop(length(shared)) do
-      [] -> "root"
-      parts -> Path.join(parts)
-    end
-  end
+  defp strip(path, shared), do: path |> Path.split() |> Enum.drop(length(shared)) |> Path.join()
 
   # Assigns each owner its base id, or the base with `_2`, `_3`... when another owner (here or in `ids`) has it.
   defp unique_ids(pairs, ids \\ %{}) do

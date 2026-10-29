@@ -48,6 +48,51 @@ defmodule XrefMermaid.ProjectTest do
     assert Map.keys(project.modules) == [A]
   end
 
+  test "new/3 doesn't count a project module it leaves out as external" do
+    project =
+      Project.new(
+        %{"lib/a.ex" => %{}},
+        [
+          %{
+            module: A,
+            file: "/p/lib/a.ex",
+            impl?: false,
+            functions: [%{name: :run, arities: [0], kind: :def, line: 1, generated?: false}],
+            calls: [{{:run, 0}, {B, :go, 0}}, {{:run, 0}, {Enum, :map, 2}}]
+          },
+          %{module: B, file: "/p/elsewhere/b.ex", impl?: false, functions: [], calls: []}
+        ],
+        "/p"
+      )
+
+    assert project.forward == %{{A, :run, 0} => [{:external, {Enum, :map, 2}}]}
+  end
+
+  test "new/3 lists each file's modules, the main one first" do
+    project =
+      TestProject.build([
+        {String.Chars.Shop.Orders, "lib/shop/orders.ex", [], [], impl?: true},
+        {Shop.Orders.Line, "lib/shop/orders.ex", [], []},
+        {Shop.Orders, "lib/shop/orders.ex", [], []}
+      ])
+
+    assert project.modules_in == %{
+             "lib/shop/orders.ex" => [Shop.Orders, Shop.Orders.Line, String.Chars.Shop.Orders]
+           }
+  end
+
+  test "parse_spec/1 reads functions as Elixir reads them" do
+    assert Project.parse_spec("Shop.Orders.place/2") == {:ok, {Shop.Orders, :place, 2}}
+    assert Project.parse_spec("Shop.Orders.valid?/1") == {:ok, {Shop.Orders, :valid?, 1}}
+    assert Project.parse_spec("Shop.Orders.place") == {:ok, {Shop.Orders, :place, nil}}
+    assert Project.parse_spec("Shop.Ops.<~>/2") == {:ok, {Shop.Ops, :<~>, 2}}
+    assert Project.parse_spec("Elixir.Shop.Orders.place/1") == {:ok, {Shop.Orders, :place, 1}}
+    assert Project.parse_spec(":ets.insert/2") == {:ok, {:ets, :insert, 2}}
+    assert Project.parse_spec("Shop.Orders") == :error
+    assert Project.parse_spec("place/1") == :error
+    assert Project.parse_spec("not valid (") == :error
+  end
+
   test "resolve/2 finds a function by any of its arities, or every arity", %{project: project} do
     assert Project.resolve(project, {Shop.Orders, :place, 2}) == {:ok, [{Shop.Orders, :place, 1}]}
 
