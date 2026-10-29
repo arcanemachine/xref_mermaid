@@ -7,6 +7,8 @@ defmodule XrefMermaid.MixProject do
       version: "0.1.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
+      # The fixture project is compiled by the integration test, not loaded as tests.
+      test_ignore_filters: [~r{^test/fixtures/}],
       deps: deps()
     ]
   end
