@@ -16,9 +16,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   Path prefixes, `--from` and `--to` can be combined; the chart shows everything they reach.
 
-    * path prefixes (arguments, relative to the app's directory) - every function in the files whose paths start
-      with one, the calls those make, and the files they depend on; a prefix matches as text, so end a directory
-      with `/` (`lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`)
+    * path prefixes (arguments, relative to the app's directory) - every non-generated function in the files whose
+      paths start with one, the calls those make, and the files they depend on; a prefix matches as text, so end a
+      directory with `/` (`lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`)
     * `--from MOD.FUN/ARITY` - the calls the function makes, followed up to `--depth` hops (repeatable; leave out
       `/ARITY` for every arity)
     * `--to MOD.FUN/ARITY` - the calls made to the function, followed up to `--depth` hops back (repeatable)

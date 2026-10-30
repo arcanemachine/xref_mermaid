@@ -26,8 +26,8 @@ mix xref.mermaid --overview --level 3 -o overview.mmd                   # the pr
 
 Path prefixes, `--from` and `--to` combine: the chart shows everything they reach.
 
-- Path prefixes (arguments): every function in the files whose paths start with one (the slice), the calls they
-  make, and the files the slice depends on. A prefix is relative to the app's directory (`./lib/...` and absolute
+- Path prefixes (arguments): every non-generated function in the files whose paths start with one (the slice), the calls
+  they make, and the files the slice depends on. A prefix is relative to the app's directory (`./lib/...` and absolute
   paths work too); one that matches no file stops the task. A prefix matches as text, so end a directory with `/`:
   `lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`.
 - `--from MOD.FUN/ARITY`: the calls the function makes, followed `--depth` calls deep (default 3). Leave out
@@ -43,8 +43,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 ### How to draw it
 
 - `-o`, `--output`: the file to write (required). Regenerating overwrites it.
-- `--all-functions`: every function of every shown file, not only the ones calls reach. Files outside the slice then
-  start collapsed.
+- `--all-functions`: every non-generated function of every shown file, not only the ones calls reach. Files outside the
+  slice then start collapsed.
 - `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules, `Kernel`
   and `String.Chars` are left out: most of those calls are what Kernel's functions and string interpolation compile
   to.

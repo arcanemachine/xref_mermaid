@@ -4,14 +4,14 @@ defmodule XrefMermaid.Selection do
 
   A selection starts from seeds, which can be combined:
 
-    * path prefixes: every function in the files under them (the slice files), the calls those functions make, and
-      the file dependencies of the slice files that no call explains (a struct, a compile-time use);
+    * path prefixes: every non-generated function in the files under them (the slice files), the calls those
+      functions make, and the file dependencies of the slice files that no call explains (a struct, a compile-time use);
     * `from:` function keys: the calls they make, followed outward up to `depth` hops;
     * `to:` function keys: the calls made to them, followed backward up to `depth` hops.
 
-  Only the functions at either end of a drawn call, and the start functions, are shown, plus every function
-  of the slice files (or of every shown file, with `all_functions: true`). Generated functions are shown only at
-  the end of a call, or as a start function.
+  Only the functions at either end of a drawn call, and the start functions, are shown, plus every non-generated
+  function of the slice files (or of every shown file, with `all_functions: true`). Generated functions are shown
+  only at the end of a call, or as a start function.
   """
 
   @doc """
