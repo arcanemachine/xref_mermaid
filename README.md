@@ -9,6 +9,7 @@ It installs as a Mix archive, so it runs in any project without being one of its
 
 ```bash
 mix archive.install github arcanemachine/xref_mermaid   # or, from a checkout: mix archive.build && mix archive.install
+mix archive.install hex xref_mermaid                    # once it's published on Hex
 ```
 
 ## Usage
