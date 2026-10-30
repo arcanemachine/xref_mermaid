@@ -16,6 +16,7 @@ defmodule XrefMermaid.SelectionTest do
              {{:place, 1}, {Shop.Repo, :insert, 1}},
              {{:place, 1}, {Enum, :map, 2}},
              {{:place, 1}, {:erlang, :length, 1}},
+             {{:place, 1}, {ArgumentError, :exception, 1}},
              {{:check, 1}, {Shop.Rules, :allowed?, 1}}
            ]},
           {Shop.Rules, "lib/shop/rules.ex",
@@ -166,6 +167,7 @@ defmodule XrefMermaid.SelectionTest do
     selection = Selection.select(project, prefixes: ["lib/shop/orders.ex"], external: true)
 
     assert selection.externals == %{Enum => [{:external, {Enum, :map, 2}}]}
+    refute Enum.any?(selection.calls, &match?({_, {:external, {_, :exception, 1}}}, &1))
     assert {{Shop.Orders, :place, 1}, {:external, {Enum, :map, 2}}} in selection.calls
     refute Enum.any?(selection.calls, &match?({_, {:external, {:erlang, _, _}}}, &1))
   end

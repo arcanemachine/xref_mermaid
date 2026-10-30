@@ -54,7 +54,7 @@ defmodule XrefMermaid.IntegrationTest do
         ~s(f_orders__place_1["place/1..2"]),
         ~s(f_orders__valid_q_1["valid?/1"]),
         ~s(f_orders__valid_b_1["valid!/1"]),
-        ~s(f_orders______2["#lt;~#gt;/2"]),
+        ~s(f_orders___lt_tilde_gt_2["#lt;~#gt;/2"]),
         ~s(f_orders__total_1["total/1"]),
         ~s(f_orders__Line__describe_1["Line.describe/1"]),
         ~s(f_orders__impl_String_Chars__to_string_1["[impl String.Chars] to_string/1"]),
@@ -156,6 +156,20 @@ defmodule XrefMermaid.IntegrationTest do
     {log, status} = mix(["xref.mermaid", "--overview", "-o", missing], @fixture, env)
     assert status != 0
     assert log =~ "Can't write #{missing}: no such file or directory"
+  end
+
+  test "warns in an umbrella app that callers in the other apps are missing", %{
+    env: env,
+    tmp_dir: tmp_dir
+  } do
+    app = Path.join(@root, "test/fixtures/umbrella/apps/core")
+    output = Path.join(tmp_dir, "core.mmd")
+
+    {log, 0} = mix(["xref.mermaid", "--to", "Core.hello/0", "-o", output], app, env)
+    assert log =~ "calls from its other apps aren't read"
+
+    {log, 0} = mix(["xref.mermaid", "--from", "Core.hello/0", "-o", output], app, env)
+    refute log =~ "warning:"
   end
 
   test "stops at an umbrella root", %{env: env} do

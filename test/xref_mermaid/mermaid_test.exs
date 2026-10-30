@@ -17,7 +17,7 @@ defmodule XrefMermaid.MermaidTest do
            ]},
           {Shop.Orders.Line, "lib/shop/orders.ex", [{:describe, [1], :def, 12}], []},
           {String.Chars.Shop.Orders, "lib/shop/orders.ex", [{:to_string, [1], :def, 16}], [],
-           impl?: true},
+           impl: {String.Chars, Shop.Orders}},
           {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2, generated: true}], []},
           {Shop.A.B, "lib/shop/a/b.ex", [{:run, [0], :def, 2}], []},
           {Shop.AB, "lib/shop/a_b.ex", [{:run, [0], :def, 2}], []},
@@ -45,7 +45,7 @@ defmodule XrefMermaid.MermaidTest do
                  subgraph f_orders ["orders.ex"]
                    f_orders__place_1["place/1..2"]
                    f_orders__valid_q_1["valid?/1"]
-                   f_orders______2["#lt;~#gt;/2"]
+                   f_orders___lt_tilde_gt_2["#lt;~#gt;/2"]
                    f_orders__Line__describe_1["Line.describe/1"]
                    f_orders__impl_String_Chars__to_string_1["[impl String.Chars] to_string/1"]
                  end
@@ -105,6 +105,14 @@ defmodule XrefMermaid.MermaidTest do
     all = Mermaid.write(project, Selection.select(project, all_opts), all_functions: true)
     assert all =~ "f_repo@{ view: collapsed }"
     refute all =~ "f_orders@{ view: collapsed }"
+  end
+
+  test "write/3 with `all_functions` and no slice collapses nothing on the call path", %{
+    project: project
+  } do
+    opts = [from: [{Shop.Orders, :place, 1}], depth: 1, all_functions: true]
+    text = Mermaid.write(project, Selection.select(project, opts), all_functions: true)
+    refute text =~ "view: collapsed"
   end
 
   test "write/3 escapes what Mermaid reads in labels" do
@@ -205,17 +213,53 @@ defmodule XrefMermaid.MermaidTest do
         {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 5}], []},
         {Shop.Orders.Line, "lib/shop/orders.ex", [{:describe, [1], :def, 9}], []},
         {Inspect.Shop.Orders.Line, "lib/shop/orders.ex", [{:inspect, [2], :def, 12}], [],
-         impl?: true}
+         impl: {Inspect, Shop.Orders.Line}}
       ])
 
     text = Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]))
 
-    assert text =~ ~s(f_orders__Shop_Order__new_0["Shop.Order.new/0"])
+    assert text =~ ~s(f_orders__Order__new_0["Order.new/0"])
     assert text =~ ~s(f_orders__place_1["place/1"])
     assert text =~ ~s(f_orders__Line__describe_1["Line.describe/1"])
 
     assert text =~
              ~s(f_orders__impl_Inspect_for_Line__inspect_2["[impl Inspect for Line] inspect/2"])
+  end
+
+  test "write/3 labels protocol implementations by protocol and type, never as the main module" do
+    project =
+      TestProject.build([
+        {Edge.Proto.Integer, "lib/edge/impls.ex", [{:describe, [1], :def, 2}], [],
+         impl: {Edge.Proto, Integer}, line: 1},
+        {Edge.Proto.Map, "lib/edge/impls.ex", [{:describe, [1], :def, 6}], [],
+         impl: {Edge.Proto, Map}, line: 5},
+        {Size, "lib/size.ex", [{:size, [1], :def, 2}], [], line: 1},
+        {Size.BitString, "lib/size.ex", [{:size, [1], :def, 6}], [],
+         impl: {Size, BitString}, line: 5},
+        {Edge.Bar, "lib/edge/two.ex", [{:b, [0], :def, 6}], [], line: 5},
+        {Edge.Foo, "lib/edge/two.ex", [{:a, [0], :def, 2}], [], line: 1}
+      ])
+
+    text = Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]))
+
+    assert text =~ ~s(["[impl Edge.Proto for Integer] describe/1"])
+    assert text =~ ~s(["[impl Edge.Proto for Map] describe/1"])
+    assert text =~ ~s(f_size__size_1["size/1"])
+    assert text =~ ~s(f_size__impl_Size_for_BitString__size_1["[impl Size for BitString] size/1"])
+
+    # Neither module is named after the file, so the first one defined is the main one.
+    assert text =~ ~s(f_edge_two__a_0["a/0"])
+    assert text =~ ~s(f_edge_two__Bar__b_0["Bar.b/0"])
+  end
+
+  test "write/3 names operator characters in ids" do
+    project =
+      TestProject.build([{Ops, "lib/ops.ex", [{:<~>, [2], :def, 1}, {:"<|>", [2], :def, 2}], []}])
+
+    text = Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]))
+
+    assert text =~ ~s(f_ops___lt_tilde_gt_2["#lt;~#gt;/2"])
+    assert text =~ ~s(f_ops___lt_pipe_gt_2["#lt;|#gt;/2"])
   end
 
   test "write_overview/1 draws one node per directory and labeled arrows" do

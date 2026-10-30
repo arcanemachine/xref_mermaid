@@ -5,10 +5,11 @@ defmodule XrefMermaid.Beam do
   """
 
   @doc """
-  Returns `%{module: module, file: absolute_path, impl?: boolean, functions: functions, calls: calls}`, or `nil`
-  when `beam` (a charlist path or the module's binary) has no Elixir debug info.
+  Returns `%{module: module, file: absolute_path, line: line, impl: impl, functions: functions, calls: calls}`, or
+  `nil` when `beam` (a charlist path or the module's binary) has no Elixir debug info.
 
-  `impl?` is `true` for a protocol implementation.
+  `line` is the line of the module's `defmodule`. `impl` is `{protocol, for}` for a protocol implementation, and
+  `nil` for any other module.
 
   `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, generated?: boolean}`, one per
   definition in file order: a function with default arguments is one entry with several arities. `kind` is `:def`,
@@ -22,13 +23,27 @@ defmodule XrefMermaid.Beam do
     with {:ok, {module, [debug_info: {:debug_info_v1, backend, data}]}} <-
            :beam_lib.chunks(beam, [:debug_info]),
          {:ok, info} <- backend.debug_info(:elixir_v1, module, data, []) do
-      impl? = Enum.any?(info.definitions, &match?({{:__impl__, 1}, _, _, _}, &1))
+      # A protocol implementation answers `__impl__(:protocol)` and `__impl__(:for)`.
+      impl =
+        for {{:__impl__, 1}, _, _, clauses} <- info.definitions,
+            {_, [key], _, value} <- clauses,
+            key in [:protocol, :for],
+            into: %{},
+            do: {key, value}
+
+      # Elixir 1.20 gives the module's line as `anno` (`{line, column}`), earlier versions as `line`.
+      line =
+        case Map.get(info, :anno, Map.get(info, :line)) do
+          {line, _column} -> line
+          line -> line
+        end
+
       definitions = Enum.reject(info.definitions, fn {{name, _}, _, _, _} -> special?(name) end)
       defined = MapSet.new(definitions, &elem(&1, 0))
 
       # The definition with all the arguments carries `defaults: n`; the n lower arities belong to the definition.
-      # (Elixir 1.20 also marks those lower arities as generated, which they aren't: they come from the written
-      # function.)
+      # Elixir 1.20 marks those lower arities as generated; the mark is ignored, as the lower arities come from the
+      # written function.
       full_arity_of =
         for {{name, arity}, kind, meta, _} <- definitions,
             defaults = meta[:defaults],
@@ -58,7 +73,14 @@ defmodule XrefMermaid.Beam do
             uniq: true,
             do: {{name, arity}, callee}
 
-      %{module: module, file: info.file, impl?: impl?, functions: functions, calls: calls}
+      %{
+        module: module,
+        file: info.file,
+        line: line,
+        impl: if(map_size(impl) == 2, do: {impl.protocol, impl.for}),
+        functions: functions,
+        calls: calls
+      }
     else
       _ -> nil
     end
@@ -72,7 +94,8 @@ defmodule XrefMermaid.Beam do
   defp calls_in(ast, module, defined) do
     {_, calls} =
       Macro.prewalk(ast, [], fn
-        # A capture is replaced by `:ok` so the capture's inner call node isn't read again as a call with no arguments.
+        # A capture is replaced by `:ok`, so the capture's inner call node isn't read again as a call with no
+        # arguments.
         {:&, _, [{:/, _, [{{:., _, [callee, name]}, _, []}, arity]}]}, calls when is_atom(callee) ->
           {:ok, [{callee, name, arity} | calls]}
 

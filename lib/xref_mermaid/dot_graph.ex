@@ -8,10 +8,13 @@ defmodule XrefMermaid.DotGraph do
   Files with no dependencies map to `%{}`.
   """
   def parse(dot) do
+    # Compiled at run time: a regex compiled into an archive breaks on another Elixir version.
+    pattern = Regex.compile!(~S'^\s*"([^"]+)"(?: -> "([^"]+)")?(?: \[label="\((\w+)\)"\])?')
+
     dot
     |> String.split("\n")
     |> Enum.reduce(%{}, fn line, graph ->
-      case Regex.run(~r/^\s*"([^"]+)"(?: -> "([^"]+)")?(?: \[label="\((\w+)\)"\])?/, line) do
+      case Regex.run(pattern, line) do
         [_, file] ->
           Map.put_new(graph, file, %{})
 

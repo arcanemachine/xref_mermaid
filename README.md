@@ -17,7 +17,7 @@ From the project to draw (in an umbrella project, from the app's directory):
 
 ```bash
 mix xref.mermaid lib/my_app/orders.ex lib/my_app/orders/ -o orders.mmd   # these files
-mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd     # what place/2 calls, 4 calls deep
+mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd     # what place/2 calls, 4 hops deep
 mix xref.mermaid --to MyApp.Repo.insert -o inserts.mmd                  # what calls insert, at any arity
 mix xref.mermaid --overview --level 3 -o overview.mmd                   # the project's directories
 ```
@@ -30,9 +30,9 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   they make, and the files the slice depends on. A prefix is relative to the app's directory (`./lib/...` and absolute
   paths work too); one that matches no file stops the task. A prefix matches as text, so end a directory with `/`:
   `lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`.
-- `--from MOD.FUN/ARITY`: the calls the function makes, followed `--depth` calls deep (default 3). Leave out
+- `--from MOD.FUN/ARITY`: the calls the function makes, followed up to `--depth` hops (default 3). Leave out
   `/ARITY` for every arity. Repeatable.
-- `--to MOD.FUN/ARITY`: the calls made to the function, followed `--depth` calls back. Repeatable.
+- `--to MOD.FUN/ARITY`: the calls made to the function, followed up to `--depth` hops back. Repeatable.
   `--from` and `--to` name functions of the project (not of its dependencies); an unknown one stops the task and
   names the closest matches.
 - `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
@@ -43,11 +43,12 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 ### How to draw it
 
 - `-o`, `--output`: the file to write (required). Regenerating overwrites it.
-- `--all-functions`: every non-generated function of every shown file, not only the ones calls reach. Files outside the
-  slice then start collapsed.
-- `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules, `Kernel`
-  and `String.Chars` are left out: most of those calls are what Kernel's functions and string interpolation compile
-  to.
+- `--all-functions`: every non-generated function of every shown file, not only the ones calls reach. With path
+  prefixes, the files outside the slice then start collapsed.
+- `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules,
+  `Kernel`, `String.Chars` and `exception/1` are left out: most of those calls are what `Kernel`'s functions, string
+  interpolation and `raise` compile to. Even so, a file's calls into libraries are many: `--external` reads best
+  with `--from` and a small `--depth`.
 - `--expanded` / `--collapsed`: opens or collapses every file (a file holding a `--from` or `--to` function always
   stays open).
 - `--link TEMPLATE`: makes each function a link to its source; `{path}` is the URL-encoded absolute path and
@@ -61,8 +62,10 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   and the slice files are yellow.
 - A private function has a dashed border, a generated one (from `use` or another macro) is grey, and a `--from` or
   `--to` function has a red border.
-- A function with default arguments is one node (`place/1..2`). In a file with several modules, functions outside
-  the main one are labeled with their module (`Line.describe/1`) or protocol (`[impl String.Chars] to_string/1`).
+- A function with default arguments is one node (`place/1..2`). In a file with several modules, the main one is the
+  module named after the file, or else the first one defined; functions of the others are labeled with their module
+  (`Line.describe/1`), and functions of a protocol implementation with the protocol and type
+  (`[impl Inspect for Line] inspect/2`, or `[impl String.Chars] to_string/1` for the main module's own).
 - `-->` is a call. A file dependency with no call behind it (a struct, a compile-time use) is a labeled arrow
   between the files: `== compile ==>`, `-. export .->` or `-. runtime .->`.
 - A collapsed file is a `<id>@{ view: collapsed }` line after its subgraph's `end` (Mermaid 12.2 supports it, though
@@ -81,6 +84,9 @@ What it can't see:
 - Calls through a variable (`apply/3`, `module.fun()`, a behaviour's or protocol's implementation called through the
   behaviour or protocol): the call stops at what the code names.
 - `super(...)` calls in an overridden function.
+- In an umbrella project, the other apps: only the current app is read, so callers in the other apps are missing
+  (the task warns when `--incoming` or `--to` runs in an umbrella app), and the other apps' functions show only as
+  external, with `--external`.
 - Macros: they are expanded before compiling, so a macro never has callers; its use shows as a compile dependency
   between files, and the code it expands to counts as the caller's.
 

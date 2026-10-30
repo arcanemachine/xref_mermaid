@@ -29,7 +29,8 @@ defmodule XrefMermaid.TestProject do
     %{
       module: module,
       file: Path.join(@root, file),
-      impl?: Keyword.get(opts, :impl?, false),
+      line: Keyword.get(opts, :line, 1),
+      impl: Keyword.get(opts, :impl),
       functions:
         Enum.map(functions, fn
           {name, arities, kind, line} -> function(name, arities, kind, line, false)

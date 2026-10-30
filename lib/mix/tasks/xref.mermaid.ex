@@ -31,9 +31,10 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     * `-o`, `--output` - the file to write (required)
     * `--all-functions` - every non-generated function of every shown file, not just the ones calls reach
-      (files outside the slice start collapsed)
-    * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel` and
-      `String.Chars` are left out, as their calls mostly come from `Kernel`'s functions and string interpolation
+      (with path prefixes, files outside the slice start collapsed)
+    * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel`,
+      `String.Chars` and `exception/1` are left out, as their calls mostly come from `Kernel`'s functions, string
+      interpolation and `raise`. Best with `--from` and a small `--depth`
     * `--expanded` / `--collapsed` - opens or collapses every file, not both (a file holding a `--from` or `--to`
       function stays open)
     * `--link TEMPLATE` - makes each function a link: `{path}` (absolute, URL-encoded) and `{line}`, e.g.
@@ -69,8 +70,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
         aliases: [o: :output]
       )
 
-    output = opts[:output] || Mix.raise("Missing --output")
     check_options!(opts, prefixes)
+    output = opts[:output]
 
     # Compiling the project prunes the code path, archives included, so this archive's modules load first.
     Application.load(:xref_mermaid)
@@ -83,8 +84,23 @@ defmodule Mix.Tasks.Xref.Mermaid do
       Mix.raise("Can't write #{output}: #{:file.format_error(reason)}")
     end
 
-    Enum.each(warnings ++ Mermaid.limit_warnings(text), &Mix.shell().error("warning: " <> &1))
+    warnings = warnings ++ umbrella_warnings(project, opts) ++ Mermaid.limit_warnings(text)
+    Enum.each(warnings, &Mix.shell().error("warning: " <> &1))
     Mix.shell().info("Wrote #{output}")
+  end
+
+  # An umbrella's apps share its lockfile. Only this app is read, so callers in the other apps are missing.
+  defp umbrella_warnings(project, opts) do
+    in_umbrella? =
+      Path.dirname(Path.expand(Mix.Project.config()[:lockfile], project.root)) != project.root
+
+    if in_umbrella? and (opts[:incoming] || Keyword.has_key?(opts, :to)) do
+      [
+        "this app is part of an umbrella; calls from its other apps aren't read, so their callers are missing"
+      ]
+    else
+      []
+    end
   end
 
   defp check_options!(opts, prefixes) do
@@ -106,6 +122,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
       !opts[:overview] and prefixes == [] and not from_or_to? ->
         Mix.raise("Give path prefixes, --from, --to or --overview")
+
+      !opts[:output] ->
+        Mix.raise("Missing --output")
 
       Keyword.has_key?(opts, :level) and !opts[:overview] ->
         Mix.raise("--level goes with --overview")

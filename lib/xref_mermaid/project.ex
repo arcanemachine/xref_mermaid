@@ -7,7 +7,8 @@ defmodule XrefMermaid.Project do
   `{:external, {module, name, arity}}` for a module outside the project.
 
   `modules_in` maps each file to its modules, the main one first: the one named after the file (`MyApp.Orders` in
-  `lib/my_app/orders.ex`), or else the one with the shortest name.
+  `lib/my_app/orders.ex`), or else the first one defined in it, a protocol implementation only when nothing else
+  is there.
   """
 
   alias XrefMermaid.{Beam, DotGraph}
@@ -131,18 +132,21 @@ defmodule XrefMermaid.Project do
         modules
         |> Map.values()
         |> Enum.group_by(& &1.file, & &1.module)
-        |> Map.new(fn {file, names} -> {file, Enum.sort_by(names, &main_rank(&1, file))} end),
+        |> Map.new(fn {file, names} ->
+          {file, Enum.sort_by(names, &main_rank(modules[&1], file))}
+        end),
       forward: Enum.group_by(calls, &elem(&1, 0), &elem(&1, 1)),
       backward: Enum.group_by(calls, &elem(&1, 1), &elem(&1, 0))
     }
   end
 
-  # The module named after its file comes first, then shorter names.
+  # A module that isn't a protocol implementation comes first, then the one named after its file, then the first
+  # one defined.
   defp main_rank(module, file) do
     path = Path.rootname(file)
-    underscored = Macro.underscore(module)
+    underscored = Macro.underscore(module.module)
     named_after_file? = path == underscored or String.ends_with?(path, "/" <> underscored)
-    {not named_after_file?, String.length(inspect(module)), module}
+    {module.impl != nil, not named_after_file?, module.line || 0, module.module}
   end
 
   @doc """

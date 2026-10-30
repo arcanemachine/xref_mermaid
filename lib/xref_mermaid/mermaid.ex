@@ -27,6 +27,8 @@ defmodule XrefMermaid.Mermaid do
   A file holding a start function (`from`/`to`) is never collapsed.
   """
   def write(project, selection, opts \\ []) do
+    ## Ids
+
     files = selection.files |> Map.keys() |> Enum.sort()
     dirs = files |> Enum.flat_map(&(&1 |> dir_parts() |> ancestors())) |> Enum.uniq()
     shared = shared_dir(files)
@@ -51,10 +53,12 @@ defmodule XrefMermaid.Mermaid do
           &function_ids(&1, selection.files[&1], project, module_parts[&1], container_ids)
         ) ++
           for {module, keys} <- externals, {:external, {_, name, arity}} = key <- keys do
-            {key, "#{container_ids[{:external_module, module}]}__#{clean(name)}_#{arity}"}
+            {key, "#{container_ids[{:external_module, module}]}__#{clean_name(name)}_#{arity}"}
           end,
         container_ids
       )
+
+    ## Text: the directory and file tree, the external modules, the arrows, then the styles and links
 
     context = %{
       ids: ids,
@@ -165,7 +169,8 @@ defmodule XrefMermaid.Mermaid do
         opts[:expanded] -> false
         Enum.any?(keys, &(&1 in selection.starts)) -> false
         opts[:collapsed] -> true
-        opts[:all_functions] -> not slice?
+        # Without a slice, every file is outside it, including the call path asked for.
+        opts[:all_functions] -> MapSet.size(selection.slice_files) > 0 and not slice?
         true -> false
       end
 
@@ -212,36 +217,55 @@ defmodule XrefMermaid.Mermaid do
       {_, id_part} = parts[function.module]
 
       {key,
-       "#{container_ids[{:file, file}]}__#{id_part}#{clean(function.name)}_#{hd(function.arities)}"}
+       "#{container_ids[{:file, file}]}__#{id_part}#{clean_name(function.name)}_#{hd(function.arities)}"}
     end
   end
 
-  # Returns `%{module => {label_prefix, id_part}}` for a file's modules. Functions outside the file's main module
-  # are labeled with their module relative to that main module (`Line.`), or as the protocol implementation they are
-  # (`[impl String.Chars] `, or `[impl Inspect for Line] ` for another module of the file).
+  # Returns `%{module => {label_prefix, id_part}}` for a file's modules. The main module's functions have no prefix;
+  # another module's are labeled with its name after the part it shares with the main module (`Line.`), and a
+  # protocol implementation's with the protocol and, unless it is the main module, the type
+  # (`[impl String.Chars] `, `[impl Inspect for Line] `).
   defp module_parts(file, project) do
-    [main | others] = Map.get(project.modules_in, file, [nil])
-    relative = fn module -> String.replace_prefix(inspect(module), inspect(main) <> ".", "") end
+    case Map.get(project.modules_in, file, []) do
+      [] ->
+        %{}
 
-    Map.new(
-      [{main, {"", ""}}] ++
-        for module <- others do
-          name = inspect(module)
+      [main | _] = modules ->
+        Map.new(modules, fn module ->
+          parts =
+            case project.modules[module].impl do
+              {protocol, for} ->
+                for_part = if for == main, do: "", else: relative_name(for, main)
+                label = "[impl #{inspect(protocol)}#{if for_part != "", do: " for #{for_part}"}] "
 
-          if project.modules[module].impl? do
-            target = Enum.find([main | others], &String.ends_with?(name, "." <> inspect(&1)))
+                id =
+                  "impl_#{clean(inspect(protocol))}#{if for_part != "", do: "_for_#{clean(for_part)}"}__"
 
-            protocol =
-              if target, do: String.replace_suffix(name, "." <> inspect(target), ""), else: name
+                {label, id}
 
-            for_part = if target in [main, nil], do: "", else: " for #{relative.(target)}"
-            id_for = if target in [main, nil], do: "", else: "_for_#{clean(relative.(target))}"
-            {module, {"[impl #{protocol}#{for_part}] ", "impl_#{clean(protocol)}#{id_for}__"}}
-          else
-            {module, {relative.(module) <> ".", clean(relative.(module)) <> "__"}}
-          end
-        end
-    )
+              nil when module == main ->
+                {"", ""}
+
+              nil ->
+                {relative_name(module, main) <> ".", clean(relative_name(module, main)) <> "__"}
+            end
+
+          {module, parts}
+        end)
+    end
+  end
+
+  # `MyApp.Orders.Line` relative to `MyApp.Orders` is `Line`; `MyApp.Order` relative to `MyApp.Orders` is `Order`.
+  defp relative_name(module, main) do
+    parts = Module.split(module)
+
+    shared =
+      parts
+      |> Enum.zip(Module.split(main))
+      |> Enum.take_while(fn {a, b} -> a == b end)
+      |> length()
+
+    parts |> Enum.drop(min(shared, length(parts) - 1)) |> Enum.join(".")
   end
 
   defp arities(%{arities: [arity]}), do: "#{arity}"
@@ -329,15 +353,45 @@ defmodule XrefMermaid.Mermaid do
     ids
   end
 
-  # Mermaid ids allow letters, digits and `_`; `?` and `!` become `_q` and `_b`, so `valid?/1` and `valid!/1`
-  # stay apart.
+  # Mermaid ids allow letters, digits and `_`; in a path or module name, any other character becomes `_`. (No
+  # regex here or in `clean_name/1`: a regex compiled into an archive breaks on another Elixir version.)
   defp clean(term) do
-    term
-    |> to_string()
-    |> String.replace("?", "_q")
-    |> String.replace("!", "_b")
-    |> String.replace(~r/[^A-Za-z0-9_]/, "_")
+    for <<char <- to_string(term)>>, into: "", do: if(id_char?(char), do: <<char>>, else: "_")
   end
+
+  # In a function name, operator characters get names, so `<~>` becomes `_lt_tilde_gt`, and `valid?/1` and
+  # `valid!/1` stay apart as `valid_q` and `valid_b`.
+  defp clean_name(name) do
+    names = %{
+      ?? => "q",
+      ?! => "b",
+      ?< => "lt",
+      ?> => "gt",
+      ?~ => "tilde",
+      ?| => "pipe",
+      ?= => "eq",
+      ?& => "amp",
+      ?+ => "plus",
+      ?- => "minus",
+      ?* => "star",
+      ?/ => "slash",
+      ?^ => "caret",
+      ?@ => "at",
+      ?\\ => "backslash",
+      ?. => "dot",
+      ?: => "colon"
+    }
+
+    for <<char <- Atom.to_string(name)>>, into: "" do
+      cond do
+        id_char?(char) -> <<char>>
+        Map.has_key?(names, char) -> "_" <> names[char]
+        true -> "_"
+      end
+    end
+  end
+
+  defp id_char?(char), do: char in ?a..?z or char in ?A..?Z or char in ?0..?9 or char == ?_
 
   # Mermaid reads `#name;` entities and HTML in labels, and `"` would end the label.
   defp escape(text) do

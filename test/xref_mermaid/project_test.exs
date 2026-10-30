@@ -39,8 +39,8 @@ defmodule XrefMermaid.ProjectTest do
       Project.new(
         %{"lib/a.ex" => %{}},
         [
-          %{module: A, file: "/p/lib/a.ex", impl?: false, functions: [], calls: []},
-          %{module: B, file: "/p/elsewhere/b.ex", impl?: false, functions: [], calls: []}
+          %{module: A, file: "/p/lib/a.ex", line: 1, impl: nil, functions: [], calls: []},
+          %{module: B, file: "/p/elsewhere/b.ex", line: 1, impl: nil, functions: [], calls: []}
         ],
         "/p"
       )
@@ -56,11 +56,12 @@ defmodule XrefMermaid.ProjectTest do
           %{
             module: A,
             file: "/p/lib/a.ex",
-            impl?: false,
+            line: 1,
+            impl: nil,
             functions: [%{name: :run, arities: [0], kind: :def, line: 1, generated?: false}],
             calls: [{{:run, 0}, {B, :go, 0}}, {{:run, 0}, {Enum, :map, 2}}]
           },
-          %{module: B, file: "/p/elsewhere/b.ex", impl?: false, functions: [], calls: []}
+          %{module: B, file: "/p/elsewhere/b.ex", line: 1, impl: nil, functions: [], calls: []}
         ],
         "/p"
       )
@@ -71,7 +72,8 @@ defmodule XrefMermaid.ProjectTest do
   test "new/3 lists each file's modules, the main one first" do
     project =
       TestProject.build([
-        {String.Chars.Shop.Orders, "lib/shop/orders.ex", [], [], impl?: true},
+        {String.Chars.Shop.Orders, "lib/shop/orders.ex", [], [],
+         impl: {String.Chars, Shop.Orders}},
         {Shop.Orders.Line, "lib/shop/orders.ex", [], []},
         {Shop.Orders, "lib/shop/orders.ex", [], []}
       ])
@@ -87,12 +89,13 @@ defmodule XrefMermaid.ProjectTest do
     unlisted = %{
       module: B,
       file: "/project/elsewhere/b.ex",
-      impl?: false,
+      line: 1,
+      impl: nil,
       functions: [],
       calls: []
     }
 
-    listed = %{module: A, file: "/project/lib/a.ex", impl?: false, functions: [], calls: []}
+    listed = %{module: A, file: "/project/lib/a.ex", line: 1, impl: nil, functions: [], calls: []}
 
     assert Project.load_warnings(project, [listed], 1) == []
 

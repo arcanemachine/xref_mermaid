@@ -43,12 +43,12 @@ defmodule XrefMermaid.Selection do
 
     ## Calls
 
-    # Erlang modules, `Kernel` and `String.Chars` are left out of external calls: most are what `Kernel`'s functions
-    # and string interpolation compile to.
+    # Erlang modules, `Kernel`, `String.Chars` and `exception/1` are left out of external calls: most are what
+    # `Kernel`'s functions, string interpolation and `raise` compile to.
     keep? = fn
-      {:external, {module, _, _}} ->
+      {:external, {module, name, arity}} ->
         opts[:external] == true and String.starts_with?(Atom.to_string(module), "Elixir.") and
-          module not in [Kernel, String.Chars]
+          module not in [Kernel, String.Chars] and {name, arity} != {:exception, 1}
 
       _ ->
         true

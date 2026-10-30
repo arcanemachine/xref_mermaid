@@ -32,7 +32,7 @@ defmodule XrefMermaid.BeamTest do
       """)
 
     assert module.module == BeamTest.Orders
-    assert module.impl? == false
+    assert module.impl == nil
 
     assert Enum.map(module.functions, &{&1.name, &1.arities, &1.kind, &1.generated?}) == [
              {:place, [1, 2], :def, false},
@@ -131,10 +131,10 @@ defmodule XrefMermaid.BeamTest do
       end
       """)
 
-    assert Enum.map(modules, &{&1.module, &1.impl?}) == [
-             {BeamTest.Thing, false},
-             {BeamTest.Show, false},
-             {BeamTest.Show.BeamTest.Thing, true}
+    assert Enum.map(modules, &{&1.module, &1.impl, &1.line}) == [
+             {BeamTest.Thing, nil, 1},
+             {BeamTest.Show, nil, 5},
+             {BeamTest.Show.BeamTest.Thing, {BeamTest.Show, BeamTest.Thing}, 9}
            ]
   end
 
