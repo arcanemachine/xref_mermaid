@@ -11,7 +11,7 @@ defmodule XrefMermaid.Selection do
 
   Only the functions at either end of a drawn call, and the start functions, are shown, plus every function
   of the slice files (or of every shown file, with `all_functions: true`). Generated functions are shown only at
-  the end of a call.
+  the end of a call, or as a start function.
   """
 
   @doc """
@@ -42,7 +42,7 @@ defmodule XrefMermaid.Selection do
 
     ## Calls
 
-    # Erlang modules, `Kernel` and `String.Chars` are left out of external calls: most are what Kernel's functions
+    # Erlang modules, `Kernel` and `String.Chars` are left out of external calls: most are what `Kernel`'s functions
     # and string interpolation compile to.
     keep? = fn
       {:external, {module, _, _}} ->

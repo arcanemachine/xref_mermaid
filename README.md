@@ -50,8 +50,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   to.
 - `--expanded` / `--collapsed`: opens or collapses every file (a file holding a `--from` or `--to` function always
   stays open).
-- `--link TEMPLATE`: makes each function a link to its source; `{path}` is the absolute path and `{line}` the
-  line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
+- `--link TEMPLATE`: makes each function a link to its source; `{path}` is the URL-encoded absolute path and
+  `{line}` the line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
   `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart can't change it).
 - `--legend`: adds a legend.
 

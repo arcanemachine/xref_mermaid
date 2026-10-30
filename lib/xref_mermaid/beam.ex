@@ -26,8 +26,9 @@ defmodule XrefMermaid.Beam do
       definitions = Enum.reject(info.definitions, fn {{name, _}, _, _, _} -> special?(name) end)
       defined = MapSet.new(definitions, &elem(&1, 0))
 
-      # The definition with all the arguments carries `defaults: n`; the n lower arities belong to it. (Elixir 1.20
-      # also marks those lower arities as generated, which they aren't: they come from the written function.)
+      # The definition with all the arguments carries `defaults: n`; the n lower arities belong to the definition.
+      # (Elixir 1.20 also marks those lower arities as generated, which they aren't: they come from the written
+      # function.)
       full_arity_of =
         for {{name, arity}, kind, meta, _} <- definitions,
             defaults = meta[:defaults],
@@ -71,7 +72,7 @@ defmodule XrefMermaid.Beam do
   defp calls_in(ast, module, defined) do
     {_, calls} =
       Macro.prewalk(ast, [], fn
-        # A capture is replaced by `:ok` so its inner call node isn't read again as a call with no arguments.
+        # A capture is replaced by `:ok` so the capture's inner call node isn't read again as a call with no arguments.
         {:&, _, [{:/, _, [{{:., _, [callee, name]}, _, []}, arity]}]}, calls when is_atom(callee) ->
           {:ok, [{callee, name, arity} | calls]}
 
