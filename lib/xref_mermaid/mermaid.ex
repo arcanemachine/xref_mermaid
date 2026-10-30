@@ -217,7 +217,7 @@ defmodule XrefMermaid.Mermaid do
   end
 
   # Returns `%{module => {label_prefix, id_part}}` for a file's modules. Functions outside the file's main module
-  # are labeled with their module relative to it (`Line.`), or as the protocol implementation they are
+  # are labeled with their module relative to that main module (`Line.`), or as the protocol implementation they are
   # (`[impl String.Chars] `, or `[impl Inspect for Line] ` for another module of the file).
   defp module_parts(file, project) do
     [main | others] = Map.get(project.modules_in, file, [nil])
@@ -291,7 +291,7 @@ defmodule XrefMermaid.Mermaid do
 
   defp ancestors(parts), do: Enum.scan(parts, &Path.join(&2, &1))
 
-  # The directory every file shares (e.g. `lib/my_app`), left out of ids to keep the chart under Mermaid's text
+  # The directory every file shares (e.g. `lib/my_app`), left out of file ids to keep the chart under Mermaid's text
   # size limit.
   defp shared_dir([]), do: []
 

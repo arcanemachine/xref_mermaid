@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--all-functions` - every non-generated function of every shown file, not just the ones calls reach
       (files outside the slice start collapsed)
     * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel` and
-      `String.Chars` are left out, as their calls mostly come from Kernel's functions and string interpolation
+      `String.Chars` are left out, as their calls mostly come from `Kernel`'s functions and string interpolation
     * `--expanded` / `--collapsed` - opens or collapses every file, not both (a file holding a `--from` or `--to`
       function stays open)
     * `--link TEMPLATE` - makes each function a link: `{path}` (absolute, URL-encoded) and `{line}`, e.g.

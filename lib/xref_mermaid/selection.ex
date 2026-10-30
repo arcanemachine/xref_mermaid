@@ -55,7 +55,7 @@ defmodule XrefMermaid.Selection do
 
     depth = Keyword.get(opts, :depth, 3)
 
-    # The slice's own calls (and, with `incoming`, the calls into it) are one step from its functions.
+    # The slice's own calls (and, with `incoming`, the calls into the slice) are one step from its functions.
     calls =
       (walk(project.forward, slice_functions, 1, keep?, :forward) ++
          if(incoming?, do: walk(project.backward, slice_functions, 1, keep?, :backward), else: []) ++
@@ -115,8 +115,8 @@ defmodule XrefMermaid.Selection do
     }
   end
 
-  # A shown file lists the functions at the end of a drawn call, and its other non-generated functions when it is a
-  # slice file or `all_functions?` is set; in file order.
+  # A shown file lists the functions at the end of a drawn call or the start functions, and its other non-generated
+  # functions when the file is a slice file or `all_functions?` is set; in file order.
   defp shown_functions(project, shown_files, endpoints, slice_files, all_functions?) do
     functions_in = project.functions |> Map.values() |> Enum.group_by(& &1.file)
 
