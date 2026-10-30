@@ -1,6 +1,6 @@
 defmodule XrefMermaid.Selection do
   @moduledoc """
-  Picks the part of a `XrefMermaid.Project` to draw.
+  Picks the part of an `XrefMermaid.Project` to draw.
 
   A selection starts from seeds, which can be combined:
 
@@ -9,8 +9,9 @@ defmodule XrefMermaid.Selection do
     * `from:` function keys: the calls they make, followed outward up to `depth` hops;
     * `to:` function keys: the calls made to them, followed backward up to `depth` hops.
 
-  Only the functions at either end of a drawn call are shown, plus every function of the slice files (or of every
-  shown file, with `all_functions: true`). Generated functions are shown only at the end of a call.
+  Only the functions at either end of a drawn call, and the start functions, are shown, plus every function
+  of the slice files (or of every shown file, with `all_functions: true`). Generated functions are shown only at
+  the end of a call.
   """
 
   @doc """
@@ -114,8 +115,8 @@ defmodule XrefMermaid.Selection do
     }
   end
 
-  # A shown file lists the functions at the end of a drawn call, and its other written functions when it is a slice
-  # file or `all_functions?` is set; in file order.
+  # A shown file lists the functions at the end of a drawn call, and its other non-generated functions when it is a
+  # slice file or `all_functions?` is set; in file order.
   defp shown_functions(project, shown_files, endpoints, slice_files, all_functions?) do
     functions_in = project.functions |> Map.values() |> Enum.group_by(& &1.file)
 

@@ -97,8 +97,8 @@ defmodule XrefMermaid.ProjectTest do
     assert Project.load_warnings(project, [listed], 1) == []
 
     assert Project.load_warnings(project, [listed, unlisted], 4) == [
-             "2 compiled modules have no debug info, so their functions are missing",
-             "1 modules come from files that `mix xref` doesn't list, so their functions are missing"
+             "compiled modules without debug info, whose functions are missing: 2",
+             "modules from files that `mix xref` doesn't list, whose functions are missing: 1"
            ]
   end
 

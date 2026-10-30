@@ -1,8 +1,8 @@
 # XrefMermaid
 
 A Mix task that draws part of an Elixir project as a Mermaid flowchart: its files, their functions, and the calls
-between them. Start from files, from a function (what it calls), or from callers (what calls it), or draw the
-directories of the whole project.
+between them. Start from files, from a function (what it calls), or from a function's callers (what calls it), or
+draw the directories of the whole project.
 
 It installs as a Mix archive, so it runs in any project without being one of its dependencies. It supports Elixir
 1.15 and later. An archive is compiled by the Elixir that installs it, so install it once per Elixir version you use:
@@ -28,7 +28,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 
 - Path prefixes (arguments): every function in the files whose paths start with one (the slice), the calls they
   make, and the files the slice depends on. A prefix is relative to the app's directory (`./lib/...` and absolute
-  paths work too); one that matches no file stops the task.
+  paths work too); one that matches no file stops the task. A prefix matches as text, so end a directory with `/`:
+  `lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`.
 - `--from MOD.FUN/ARITY`: the calls the function makes, followed `--depth` calls deep (default 3). Leave out
   `/ARITY` for every arity. Repeatable.
 - `--to MOD.FUN/ARITY`: the calls made to the function, followed `--depth` calls back. Repeatable.
@@ -51,7 +52,7 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   stays open).
 - `--link TEMPLATE`: makes each function a link to its source; `{path}` is the absolute path and `{line}` the
   line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
-  `securityLevel: "loose"` (its default, `"strict"`, turns them off, and a chart can't change it).
+  `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart can't change it).
 - `--legend`: adds a legend.
 
 ## Reading the chart

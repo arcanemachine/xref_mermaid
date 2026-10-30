@@ -38,8 +38,8 @@ defmodule XrefMermaid.Project do
     dot_path =
       Path.join(System.tmp_dir!(), "xref_mermaid_#{System.unique_integer([:positive])}.dot")
 
-    # The project compiles first, with its messages shown; xref then runs quietly, as it would only print how to
-    # render its dot file.
+    # The project compiles first, with its messages shown; xref then runs quietly, since `mix xref graph` would only
+    # print how to render the dot file.
     Mix.Task.run("compile")
     shell = Mix.shell()
 
@@ -74,11 +74,11 @@ defmodule XrefMermaid.Project do
     [
       if(without_debug_info > 0,
         do:
-          "#{without_debug_info} compiled modules have no debug info, so their functions are missing"
+          "compiled modules without debug info, whose functions are missing: #{without_debug_info}"
       ),
       if(unmatched > 0,
         do:
-          "#{unmatched} modules come from files that `mix xref` doesn't list, so their functions are missing"
+          "modules from files that `mix xref` doesn't list, whose functions are missing: #{unmatched}"
       )
     ]
     |> Enum.reject(&is_nil/1)

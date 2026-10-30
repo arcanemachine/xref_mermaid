@@ -2,7 +2,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
   @shortdoc "Writes a Mermaid flowchart of the project's files, functions and calls"
 
   @moduledoc """
-  Writes a Mermaid flowchart of part of the project: files, their functions, and the calls between them.
+  Writes a Mermaid flowchart of part of the project: files, their functions, and the calls between them, or an
+  overview of the whole project.
 
       mix xref.mermaid lib/my_app/orders.ex lib/my_app/orders/ -o orders.mmd
       mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd
@@ -13,27 +14,29 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   ## What to draw
 
-  These can be combined; the chart shows everything they reach.
+  Path prefixes, `--from` and `--to` can be combined; the chart shows everything they reach.
 
-    * path prefixes (arguments, relative to the app's directory) - every function in the files under them, the
-      calls those make, and the files they depend on
+    * path prefixes (arguments, relative to the app's directory) - every function in the files whose paths start
+      with one, the calls those make, and the files they depend on; a prefix matches as text, so end a directory
+      with `/` (`lib/my_app/orders` also matches `lib/my_app/orders_helpers.ex`)
     * `--from MOD.FUN/ARITY` - the calls the function makes, followed `--depth` hops (repeatable; leave out
       `/ARITY` for every arity)
     * `--to MOD.FUN/ARITY` - the calls made to the function, followed `--depth` hops back (repeatable)
     * `--depth N` - hops for `--from` and `--to` (default 3)
-    * `--incoming` - also the calls into the path slice and the files that depend on it
-    * `--overview` - instead of all the above: one node per directory `--level` deep (default 2), arrows between
-      them
+    * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
+    * `--overview` - instead of all the above; takes only `--level` (default 2): one node per directory
+      `--level` deep, arrows between them
 
   ## How to draw it
 
     * `-o`, `--output` - the file to write (required)
     * `--all-functions` - every function of every shown file, not just the ones calls reach (files outside the
       slice start collapsed)
-    * `--external` - also calls to Elixir modules outside the project, as leaves (not Erlang modules, `Kernel` or
-      `String.Chars`, which are mostly what Kernel's functions and string interpolation compile to)
-    * `--expanded` / `--collapsed` - opens or collapses every file
-    * `--link TEMPLATE` - makes each function a link: `{path}` (absolute) and `{line}`, e.g.
+    * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel` and
+      `String.Chars` are left out, as their calls mostly come from Kernel's functions and string interpolation
+    * `--expanded` / `--collapsed` - opens or collapses every file, not both (a file holding a `--from` or `--to`
+      function stays open)
+    * `--link TEMPLATE` - makes each function a link: `{path}` (absolute, URL-encoded) and `{line}`, e.g.
       `vscode://file{path}:{line}`
     * `--legend` - adds a legend
 

@@ -8,6 +8,8 @@ defmodule XrefMermaid.Beam do
   Returns `%{module: module, file: absolute_path, impl?: boolean, functions: functions, calls: calls}`, or `nil`
   when `beam` (a charlist path or the module's binary) has no Elixir debug info.
 
+  `impl?` is `true` for a protocol implementation.
+
   `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, generated?: boolean}`, one per
   definition in file order: a function with default arguments is one entry with several arities. `kind` is `:def`,
   `:defp`, `:defmacro` or `:defmacrop`. `generated?` marks functions that `use` or another macro has defined.

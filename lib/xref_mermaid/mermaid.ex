@@ -4,7 +4,7 @@ defmodule XrefMermaid.Mermaid do
 
   Every id is prefixed (`d_` directory, `f_` file and its functions, `x_` external), which keeps ids clear of
   Mermaid's keywords (`end`, `graph`...), and is unique: a clash between two names that read the same once cleaned
-  (`lib/a/b.ex` and `lib/a_b.ex`) gets a `_2` suffix.
+  (`lib/a/b.ex` and `lib/a_b.ex`) gets a `_2`, `_3`... suffix.
   """
 
   # A labeled file dependency is written `a <open> kind <close> b`.
@@ -255,7 +255,7 @@ defmodule XrefMermaid.Mermaid do
   end
 
   defp link_line(function, ids, project, template) do
-    # Every reserved character but `/` is encoded, so a `#` or `?` in a path stays part of it.
+    # Every character but `/` and unreserved ones is encoded, so a `#` or `?` in a path is not a fragment or query.
     path =
       URI.encode(Path.join(project.root, function.file), &(URI.char_unreserved?(&1) or &1 == ?/))
 
@@ -329,7 +329,7 @@ defmodule XrefMermaid.Mermaid do
     ids
   end
 
-  # Mermaid ids allow letters, digits and `_`; `?` and `!` keep their own spellings so `valid?/1` and `valid!/1`
+  # Mermaid ids allow letters, digits and `_`; `?` and `!` become `_q` and `_b`, so `valid?/1` and `valid!/1`
   # stay apart.
   defp clean(term) do
     term
@@ -339,7 +339,7 @@ defmodule XrefMermaid.Mermaid do
     |> String.replace(~r/[^A-Za-z0-9_]/, "_")
   end
 
-  # Mermaid reads `#name;` entities in labels, and `"` would end the label.
+  # Mermaid reads `#name;` entities and HTML in labels, and `"` would end the label.
   defp escape(text) do
     text
     |> String.replace("#", "#35;")
