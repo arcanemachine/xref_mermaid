@@ -107,8 +107,15 @@ defmodule XrefMermaid.SelectionTest do
     refute Map.has_key?(two.files, "lib/shop/order.ex")
 
     all = Selection.select(project, from: [{Shop.Orders, :place, 1}], depth: 10)
-    assert {{Shop.Rules, :again, 1}, {Shop.Rules, :allowed?, 1}} in all.calls
-    assert length(all.calls) == 6
+
+    assert all.calls == [
+             {{Shop.Orders, :check, 1}, {Shop.Rules, :allowed?, 1}},
+             {{Shop.Orders, :place, 1}, {Shop.Orders, :check, 1}},
+             {{Shop.Orders, :place, 1}, {Shop.Repo, :insert, 1}},
+             {{Shop.Rules, :again, 1}, {Shop.Rules, :allowed?, 1}},
+             {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :again, 1}},
+             {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :limit, 0}}
+           ]
   end
 
   test "`to` follows calls backward", %{project: project} do
@@ -122,6 +129,26 @@ defmodule XrefMermaid.SelectionTest do
              {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :again, 1}},
              {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :limit, 0}}
            ]
+  end
+
+  test "path prefixes, `from` and `to` combine", %{project: project} do
+    selection =
+      Selection.select(project,
+        prefixes: ["lib/shop/admin.ex"],
+        from: [{Shop.Rules, :allowed?, 1}],
+        to: [{Shop.Orders, :check, 1}],
+        depth: 1
+      )
+
+    assert selection.calls == [
+             {{Shop.Admin, :retry, 1}, {Shop.Orders, :place, 1}},
+             {{Shop.Orders, :place, 1}, {Shop.Orders, :check, 1}},
+             {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :again, 1}},
+             {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :limit, 0}}
+           ]
+
+    assert selection.slice_files == MapSet.new(["lib/shop/admin.ex"])
+    assert selection.starts == MapSet.new([{Shop.Rules, :allowed?, 1}, {Shop.Orders, :check, 1}])
   end
 
   test "a start function is shown even without drawn calls", %{project: project} do

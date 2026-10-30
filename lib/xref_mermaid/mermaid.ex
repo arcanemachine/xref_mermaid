@@ -7,8 +7,12 @@ defmodule XrefMermaid.Mermaid do
   (`lib/a/b.ex` and `lib/a_b.ex`) gets a `_2` suffix.
   """
 
-  @file_arrows %{"compile" => "==", "export" => "-.", "runtime" => "-."}
-  @arrow_ends %{"compile" => "==>", "export" => ".->", "runtime" => ".->"}
+  # A labeled file dependency is written `a <open> kind <close> b`.
+  @file_arrows %{
+    "compile" => {"==", "==>"},
+    "export" => {"-.", ".->"},
+    "runtime" => {"-.", ".->"}
+  }
 
   @doc """
   Options:
@@ -24,7 +28,7 @@ defmodule XrefMermaid.Mermaid do
   """
   def write(project, selection, opts \\ []) do
     files = selection.files |> Map.keys() |> Enum.sort()
-    dirs = files |> Enum.map(&Path.dirname/1) |> Enum.flat_map(&ancestors/1) |> Enum.uniq()
+    dirs = files |> Enum.flat_map(&(&1 |> dir_parts() |> ancestors())) |> Enum.uniq()
     shared = shared_dir(files)
     externals = selection.externals |> Enum.sort()
 
@@ -68,11 +72,14 @@ defmodule XrefMermaid.Mermaid do
 
     IO.iodata_to_binary([
       "flowchart LR\n",
+      # Files at the project root sit at the top level, outside any directory.
+      Enum.map(Enum.sort(Map.get(context.files_in, ".", [])), &render_file(&1, "  ", context)),
       Enum.map(roots, &render_dir(&1, 1, context)),
       render_externals(externals, ids),
       Enum.map(selection.calls, fn {caller, callee} -> "  #{ids[caller]} --> #{ids[callee]}\n" end),
       Enum.map(selection.file_edges, fn {source, sink, kind} ->
-        "  #{ids[{:file, source}]} #{@file_arrows[kind]} #{kind} #{@arrow_ends[kind]} #{ids[{:file, sink}]}\n"
+        {open, close} = @file_arrows[kind]
+        "  #{ids[{:file, source}]} #{open} #{kind} #{close} #{ids[{:file, sink}]}\n"
       end),
       if(opts[:legend], do: legend(), else: ""),
       case Enum.filter(files, &(&1 in selection.slice_files)) do
@@ -95,15 +102,13 @@ defmodule XrefMermaid.Mermaid do
 
   @doc """
   Returns warnings for a chart over Mermaid 12's default limits (`maxTextSize`, `maxEdges`), which make it refuse to
-  draw the chart; a chart can't raise them. The legend's arrows don't count.
+  draw the chart; a chart can't raise them.
   """
   def limit_warnings(text) do
     edges =
       text
       |> String.split("\n")
-      |> Enum.count(
-        &(String.contains?(&1, ["-->", ".->", "==>"]) and not String.contains?(&1, "legend_"))
-      )
+      |> Enum.count(&String.contains?(&1, ["-->", ".->", "==>"]))
 
     [
       if(String.length(text) > 50_000,
@@ -125,7 +130,8 @@ defmodule XrefMermaid.Mermaid do
       "flowchart LR\n",
       Enum.map(overview.dirs, &~s(  #{ids[&1]}["#{escape(&1)}"]\n)),
       Enum.map(overview.edges, fn {source, sink, kind, count} ->
-        "  #{ids[source]} #{@file_arrows[kind]} #{kind} ×#{count} #{@arrow_ends[kind]} #{ids[sink]}\n"
+        {open, close} = @file_arrows[kind]
+        "  #{ids[source]} #{open} #{kind} ×#{count} #{close} #{ids[sink]}\n"
       end)
     ])
   end
@@ -212,27 +218,27 @@ defmodule XrefMermaid.Mermaid do
 
   # Returns `%{module => {label_prefix, id_part}}` for a file's modules. Functions outside the file's main module
   # are labeled with their module relative to it (`Line.`), or as the protocol implementation they are
-  # (`[impl String.Chars] `).
+  # (`[impl String.Chars] `, or `[impl Inspect for Line] ` for another module of the file).
   defp module_parts(file, project) do
     [main | others] = Map.get(project.modules_in, file, [nil])
-    main_name = inspect(main)
+    relative = fn module -> String.replace_prefix(inspect(module), inspect(main) <> ".", "") end
 
     Map.new(
       [{main, {"", ""}}] ++
         for module <- others do
           name = inspect(module)
 
-          cond do
-            project.modules[module].impl? ->
-              protocol = String.replace_suffix(name, "." <> main_name, "")
-              {module, {"[impl #{protocol}] ", "impl_#{clean(protocol)}__"}}
+          if project.modules[module].impl? do
+            target = Enum.find([main | others], &String.ends_with?(name, "." <> inspect(&1)))
 
-            String.starts_with?(name, main_name <> ".") ->
-              relative = String.replace_prefix(name, main_name <> ".", "")
-              {module, {relative <> ".", clean(relative) <> "__"}}
+            protocol =
+              if target, do: String.replace_suffix(name, "." <> inspect(target), ""), else: name
 
-            true ->
-              {module, {name <> ".", clean(name) <> "__"}}
+            for_part = if target in [main, nil], do: "", else: " for #{relative.(target)}"
+            id_for = if target in [main, nil], do: "", else: "_for_#{clean(relative.(target))}"
+            {module, {"[impl #{protocol}#{for_part}] ", "impl_#{clean(protocol)}#{id_for}__"}}
+          else
+            {module, {relative.(module) <> ".", clean(relative.(module)) <> "__"}}
           end
         end
     )
@@ -275,7 +281,15 @@ defmodule XrefMermaid.Mermaid do
     """
   end
 
-  defp ancestors(dir), do: dir |> Path.split() |> Enum.scan(&Path.join(&2, &1))
+  # A file's directory as path parts; `[]` for a file at the project root.
+  defp dir_parts(file) do
+    case Path.dirname(file) do
+      "." -> []
+      dir -> Path.split(dir)
+    end
+  end
+
+  defp ancestors(parts), do: Enum.scan(parts, &Path.join(&2, &1))
 
   # The directory every file shares (e.g. `lib/my_app`), left out of ids to keep the chart under Mermaid's text
   # size limit.
@@ -283,7 +297,7 @@ defmodule XrefMermaid.Mermaid do
 
   defp shared_dir(files) do
     files
-    |> Enum.map(&(&1 |> Path.dirname() |> Path.split()))
+    |> Enum.map(&dir_parts/1)
     |> Enum.reduce(fn parts, shared ->
       parts
       |> Enum.zip(shared)
@@ -292,7 +306,10 @@ defmodule XrefMermaid.Mermaid do
     end)
   end
 
-  defp strip(path, shared), do: path |> Path.split() |> Enum.drop(length(shared)) |> Path.join()
+  defp strip(path, shared) do
+    parts = Path.split(path)
+    parts |> Enum.drop(min(length(shared), length(parts) - 1)) |> Path.join()
+  end
 
   # Assigns each owner its base id, or the base with `_2`, `_3`... when another owner (here or in `ids`) has it.
   defp unique_ids(pairs, ids \\ %{}) do

@@ -76,7 +76,10 @@ defmodule Mix.Tasks.Xref.Mermaid do
     {project, warnings} = Project.load()
     text = if opts[:overview], do: overview(project, opts), else: chart(project, prefixes, opts)
 
-    File.write!(output, text)
+    with {:error, reason} <- File.write(output, text) do
+      Mix.raise("Can't write #{output}: #{:file.format_error(reason)}")
+    end
+
     Enum.each(warnings ++ Mermaid.limit_warnings(text), &Mix.shell().error("warning: " <> &1))
     Mix.shell().info("Wrote #{output}")
   end

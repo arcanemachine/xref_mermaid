@@ -163,14 +163,59 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~ ~s(href "x:///project/lib/my%20%231%20dir/a%3Fb.ex:3")
   end
 
-  test "limit_warnings/1 warns over Mermaid's default limits, not counting the legend" do
+  test "limit_warnings/1 warns over Mermaid's default limits" do
     assert Mermaid.limit_warnings("flowchart LR\n  a --> b\n") == []
     assert [size] = Mermaid.limit_warnings(String.duplicate("x", 50_001))
     assert size =~ "50001 characters"
 
-    arrows = String.duplicate("  a --> b\n", 501)
-    assert [count] = Mermaid.limit_warnings(arrows <> "    legend_caller --> legend_called\n")
+    assert [count] = Mermaid.limit_warnings(String.duplicate("  a -. runtime .-> b\n", 501))
     assert count =~ "501 arrows"
+  end
+
+  test "write/3 draws files at the project root at the top level" do
+    project =
+      TestProject.build([
+        {A, "a.ex", [{:run, [0], :def, 1}], [{{:run, 0}, {B, :go, 0}}]},
+        {B, "lib/b.ex", [{:go, [0], :def, 1}], []}
+      ])
+
+    assert Mermaid.write(project, Selection.select(project, prefixes: ["a.ex"])) =~ """
+           flowchart LR
+             subgraph f_a ["a.ex"]
+               f_a__run_0["run/0"]
+             end
+             subgraph d_lib ["lib/"]
+               subgraph f_lib_b ["b.ex"]
+                 f_lib_b__go_0["go/0"]
+               end
+             end
+             f_a__run_0 --> f_lib_b__go_0
+           """
+
+    alone = TestProject.build([{A, "a.ex", [{:run, [0], :def, 1}], []}])
+
+    assert Mermaid.write(alone, Selection.select(alone, prefixes: ["a.ex"])) =~
+             ~s(subgraph f_a ["a.ex"])
+  end
+
+  test "write/3 labels a file's other modules after the module named for the file" do
+    project =
+      TestProject.build([
+        {Shop.Order, "lib/shop/orders.ex", [{:new, [0], :def, 1}], []},
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 5}], []},
+        {Shop.Orders.Line, "lib/shop/orders.ex", [{:describe, [1], :def, 9}], []},
+        {Inspect.Shop.Orders.Line, "lib/shop/orders.ex", [{:inspect, [2], :def, 12}], [],
+         impl?: true}
+      ])
+
+    text = Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]))
+
+    assert text =~ ~s(f_orders__Shop_Order__new_0["Shop.Order.new/0"])
+    assert text =~ ~s(f_orders__place_1["place/1"])
+    assert text =~ ~s(f_orders__Line__describe_1["Line.describe/1"])
+
+    assert text =~
+             ~s(f_orders__impl_Inspect_for_Line__inspect_2["[impl Inspect for Line] inspect/2"])
   end
 
   test "write_overview/1 draws one node per directory and labeled arrows" do

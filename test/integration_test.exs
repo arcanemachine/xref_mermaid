@@ -95,6 +95,27 @@ defmodule XrefMermaid.IntegrationTest do
     refute text =~ "f_receipt"
   end
 
+  test "passes the drawing options through", context do
+    args = [
+      "lib/sample/totals.ex",
+      "--incoming",
+      "--all-functions",
+      "--external",
+      "--legend",
+      "--link",
+      "x://{path}:{line}"
+    ]
+
+    {text, _log} = chart(args, context)
+
+    assert text =~ "f_orders__total_1 --> f_totals__total_1"
+    assert text =~ "f_orders@{ view: collapsed }"
+    assert text =~ ~s(f_orders__label_1["label/1"])
+    assert text =~ "f_totals__total_1 --> x_Enum__sum_1"
+    assert text =~ ~s(subgraph legend_ ["Legend"])
+    assert text =~ ~s(click f_totals__total_1 href "x://#{@fixture}/lib/sample/totals.ex:2")
+  end
+
   test "draws an overview", context do
     {text, _log} = chart(["--overview", "--level", "3"], context)
     assert text =~ ~s(d_lib_sample__["lib/sample/*"])
@@ -121,6 +142,20 @@ defmodule XrefMermaid.IntegrationTest do
 
     assert failure(["--from", "Sample.Orders.place", "--incoming"], context) =~
              "--incoming goes with path prefixes"
+  end
+
+  test "stops with a message outside a project and on an unwritable output", %{
+    env: env,
+    tmp_dir: tmp_dir
+  } do
+    {log, status} = mix(["xref.mermaid", "--overview", "-o", "x.mmd"], tmp_dir, env)
+    assert status != 0
+    assert log =~ "Could not find a Mix.Project"
+
+    missing = Path.join(tmp_dir, "missing/dir/x.mmd")
+    {log, status} = mix(["xref.mermaid", "--overview", "-o", missing], @fixture, env)
+    assert status != 0
+    assert log =~ "Can't write #{missing}: no such file or directory"
   end
 
   test "stops at an umbrella root", %{env: env} do

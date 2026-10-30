@@ -8,7 +8,7 @@ It installs as a Mix archive, so it runs in any project without being one of its
 1.15 and later. An archive is compiled by the Elixir that installs it, so install it once per Elixir version you use:
 
 ```bash
-mix archive.install github <user>/xref_mermaid   # or, from a checkout: mix archive.build && mix archive.install
+mix archive.install github arcanemachine/xref_mermaid   # or, from a checkout: mix archive.build && mix archive.install
 ```
 
 ## Usage
@@ -32,7 +32,9 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--from MOD.FUN/ARITY`: the calls the function makes, followed `--depth` calls deep (default 3). Leave out
   `/ARITY` for every arity. Repeatable.
 - `--to MOD.FUN/ARITY`: the calls made to the function, followed `--depth` calls back. Repeatable.
-- `--incoming`: also the calls into the slice, and the files that depend on it.
+  `--from` and `--to` name functions of the project (not of its dependencies); an unknown one stops the task and
+  names the closest matches.
+- `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
 - `--overview`: instead, one node per directory `--level` deep (default 2: `lib/my_app/`), with an arrow per pair of
   directories labeled with the strongest dependency kind and the number of file dependencies. Files directly in a
   shallower directory form their own node: at level 2, `lib/my_app.ex` is in `lib/*`.

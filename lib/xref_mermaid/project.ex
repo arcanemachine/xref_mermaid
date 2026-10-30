@@ -6,7 +6,8 @@ defmodule XrefMermaid.Project do
   default arguments is one function. A call goes from a function key to a function key, or to
   `{:external, {module, name, arity}}` for a module outside the project.
 
-  `modules_in` maps each file to its modules, the main one (the shortest name) first.
+  `modules_in` maps each file to its modules, the main one first: the one named after the file (`MyApp.Orders` in
+  `lib/my_app/orders.ex`), or else the one with the shortest name.
   """
 
   alias XrefMermaid.{Beam, DotGraph}
@@ -26,6 +27,8 @@ defmodule XrefMermaid.Project do
   Returns `{project, warnings}`.
   """
   def load do
+    Mix.Project.get!()
+
     if Mix.Project.umbrella?() do
       Mix.raise("Run this task from an app's directory, not from the umbrella root")
     end
@@ -43,14 +46,15 @@ defmodule XrefMermaid.Project do
     file_edges =
       try do
         Mix.shell(Mix.Shell.Quiet)
-        Mix.Task.rerun("xref", ~w(graph --format dot --output #{dot_path}))
+        Mix.Task.rerun("xref", ["graph", "--format", "dot", "--output", dot_path])
         dot_path |> File.read!() |> DotGraph.parse()
       after
         Mix.shell(shell)
         File.rm(dot_path)
       end
 
-    beams = Path.wildcard(Path.join(Mix.Project.compile_path(), "*.beam"))
+    # Erlang modules (from `src/`) are left out: they have no Elixir debug info to read.
+    beams = Path.wildcard(Path.join(Mix.Project.compile_path(), "Elixir.*.beam"))
     modules = beams |> Enum.map(&Beam.read(String.to_charlist(&1))) |> Enum.reject(&is_nil/1)
     project = new(file_edges, modules, root)
     {project, load_warnings(project, modules, length(beams))}
@@ -127,12 +131,18 @@ defmodule XrefMermaid.Project do
         modules
         |> Map.values()
         |> Enum.group_by(& &1.file, & &1.module)
-        |> Map.new(fn {file, names} ->
-          {file, Enum.sort_by(names, &{String.length(inspect(&1)), &1})}
-        end),
+        |> Map.new(fn {file, names} -> {file, Enum.sort_by(names, &main_rank(&1, file))} end),
       forward: Enum.group_by(calls, &elem(&1, 0), &elem(&1, 1)),
       backward: Enum.group_by(calls, &elem(&1, 1), &elem(&1, 0))
     }
+  end
+
+  # The module named after its file comes first, then shorter names.
+  defp main_rank(module, file) do
+    path = Path.rootname(file)
+    underscored = Macro.underscore(module)
+    named_after_file? = path == underscored or String.ends_with?(path, "/" <> underscored)
+    {not named_after_file?, String.length(inspect(module)), module}
   end
 
   @doc """

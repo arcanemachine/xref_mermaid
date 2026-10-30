@@ -96,19 +96,8 @@ defmodule XrefMermaid.Selection do
           Enum.flat_map(file_edges, fn {source, sink, _} -> [source, sink] end)
       )
 
-    functions_in = project.functions |> Map.values() |> Enum.group_by(& &1.file)
-    all_functions? = opts[:all_functions] == true
-
     files =
-      for file <- shown_files, into: %{} do
-        keys =
-          for function <- Map.get(functions_in, file, []),
-              function.key in endpoints or
-                (not function.generated? and (file in slice_files or all_functions?)),
-              do: function.key
-
-        {file, Enum.sort_by(keys, &{project.functions[&1].line, &1})}
-      end
+      shown_functions(project, shown_files, endpoints, slice_files, opts[:all_functions] == true)
 
     externals =
       for {:external, {module, _, _}} = key <- endpoints, reduce: %{} do
@@ -123,6 +112,22 @@ defmodule XrefMermaid.Selection do
       starts: MapSet.new(starts),
       externals: externals
     }
+  end
+
+  # A shown file lists the functions at the end of a drawn call, and its other written functions when it is a slice
+  # file or `all_functions?` is set; in file order.
+  defp shown_functions(project, shown_files, endpoints, slice_files, all_functions?) do
+    functions_in = project.functions |> Map.values() |> Enum.group_by(& &1.file)
+
+    for file <- shown_files, into: %{} do
+      keys =
+        for function <- Map.get(functions_in, file, []),
+            function.key in endpoints or
+              (not function.generated? and (file in slice_files or all_functions?)),
+            do: function.key
+
+      {file, Enum.sort_by(keys, &{project.functions[&1].line, &1})}
+    end
   end
 
   # Breadth-first from `seeds`, `depth` steps, over `edges`: a map from a key to its callees (`:forward`) or callers
