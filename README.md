@@ -95,5 +95,5 @@ What it can't see:
 
 ```bash
 mix test                        # unit tests
-mix test --include integration  # also builds the archive and runs the task on test/fixtures/sample_app
+mix test --include integration  # also builds the archive and runs the task on the projects in test/fixtures/
 ```
