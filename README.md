@@ -57,6 +57,13 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart can't change it).
 - `--legend`: adds a legend.
 
+### Version check
+
+A development feature, which may be removed: with `XREF_MERMAID_VERSION_CHECK=1` set, the task asks GitHub whether
+`main` has commits the installed archive wasn't built from, and if so warns and gives the command to reinstall. It
+gives up silently on any error (no network, an archive built from a commit GitHub doesn't have, an archive built
+without `git`).
+
 ## Reading the chart
 
 - Each directory is a subgraph; each file is a subgraph of its shown functions (a plain node when none is shown),

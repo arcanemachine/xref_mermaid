@@ -42,11 +42,16 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--legend` - adds a legend
 
   Regenerating overwrites the output file.
+
+  ## Version check
+
+  A development feature, which may be removed: with `XREF_MERMAID_VERSION_CHECK=1` set, the task warns when GitHub
+  has a newer commit than the one the archive was built from.
   """
 
   use Mix.Task
 
-  alias XrefMermaid.{Mermaid, Project, Selection}
+  alias XrefMermaid.{Mermaid, Project, Selection, VersionCheck}
 
   @impl true
   def run(argv) do
@@ -77,6 +82,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     Application.load(:xref_mermaid)
     Code.ensure_all_loaded!(Application.spec(:xref_mermaid, :modules))
 
+    # The check runs before compiling, which prunes the code path of the applications the check uses.
+    version_warnings = VersionCheck.warnings()
     {project, warnings} = Project.load()
     text = if opts[:overview], do: overview(project, opts), else: chart(project, prefixes, opts)
 
@@ -84,7 +91,12 @@ defmodule Mix.Tasks.Xref.Mermaid do
       Mix.raise("Can't write #{output}: #{:file.format_error(reason)}")
     end
 
-    warnings = warnings ++ umbrella_warnings(project, opts) ++ Mermaid.limit_warnings(text)
+    warnings =
+      warnings ++
+        umbrella_warnings(project, opts) ++
+        Mermaid.limit_warnings(text) ++
+        version_warnings
+
     Enum.each(warnings, &Mix.shell().error("warning: " <> &1))
     Mix.shell().info("Wrote #{output}")
   end

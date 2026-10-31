@@ -17,5 +17,5 @@ defmodule XrefMermaid.MixProject do
     ]
   end
 
-  def application, do: []
+  def application, do: [extra_applications: [:inets, :public_key, :ssl]]
 end
