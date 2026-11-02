@@ -11,10 +11,11 @@ defmodule XrefMermaid.Beam do
   `line` is the line of the module's `defmodule`. `impl` is `{protocol, for}` for a protocol implementation, and
   `nil` for any other module.
 
-  `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, generated?: boolean}`, one per
-  definition in file order: a function with default arguments is one entry with several arities. `kind` is `:def`,
-  `:defp`, `:defmacro` or `:defmacrop`. `generated?` marks functions that `use` or another macro has defined.
-  Functions named like `__struct__` are left out.
+  `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, generated?: boolean, doc: doc, specs:
+  specs}`, one per definition in file order: a function with default arguments is one entry with several arities.
+  `kind` is `:def`, `:defp`, `:defmacro` or `:defmacrop`. `generated?` marks functions that `use` or another macro
+  has defined. `doc` is the `@doc` text (`nil` without one) and `specs` the `@spec`s as text, short for a label: without
+  the function's name, and with module names cut to their last part (`(Order.t()) :: :ok`). Functions named like `__struct__` are left out.
 
   `calls` holds `{{name, arity}, {module, name, arity}}`: the caller in this module and the function called,
   once per pair, recursion left out. Calls through a variable (`apply/3`, `module.fun()`) can't be resolved.
@@ -51,15 +52,24 @@ defmodule XrefMermaid.Beam do
             into: %{},
             do: {{name, kind, lower}, arity}
 
+      binary = if is_binary(beam), do: beam, else: File.read!(beam)
+      docs = docs(binary)
+      specs = specs(binary)
+
       functions =
         for {{name, arity}, kind, meta, _} <- definitions,
             not Map.has_key?(full_arity_of, {name, kind, arity}) do
+          arities = Enum.to_list((arity - Keyword.get(meta, :defaults, 0))..arity)
+
           %{
             name: name,
-            arities: Enum.to_list((arity - Keyword.get(meta, :defaults, 0))..arity),
+            arities: arities,
             kind: kind,
             line: meta[:line],
-            generated?: meta[:context] != nil
+            generated?: meta[:context] != nil,
+            doc: docs[{name, arity}],
+            # A function with default arguments may have a spec for each arity; the full arity's comes first.
+            specs: arities |> Enum.reverse() |> Enum.flat_map(&Map.get(specs, {name, &1}, []))
           }
         end
         |> Enum.sort_by(&{&1.line, &1.arities})
@@ -83,6 +93,68 @@ defmodule XrefMermaid.Beam do
       }
     else
       _ -> nil
+    end
+  end
+
+  # Returns `%{{name, arity} => text}` for the functions and macros with a `@doc` (not `@doc false`).
+  defp docs(binary) do
+    case :beam_lib.chunks(binary, [~c"Docs"]) do
+      {:ok, {_, [{~c"Docs", chunk}]}} ->
+        {:docs_v1, _, _, _, _, _, entries} = :erlang.binary_to_term(chunk)
+
+        for {{kind, name, arity}, _, _, %{} = doc, _} <- entries,
+            kind in [:function, :macro],
+            text = doc["en"] || doc |> Map.values() |> List.first(),
+            into: %{},
+            do: {{name, arity}, text}
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Returns `%{{name, arity} => [spec text]}`. A macro's spec is under its arity plus one (its caller argument).
+  defp specs(binary) do
+    case Code.Typespec.fetch_specs(binary) do
+      {:ok, specs} ->
+        Map.new(specs, fn {{name, arity}, specs} ->
+          {{name, arity}, Enum.map(specs, &spec_text(name, &1))}
+        end)
+
+      :error ->
+        %{}
+    end
+  end
+
+  defp spec_text(name, spec) do
+    text =
+      name
+      |> Code.Typespec.spec_to_quoted(spec)
+      |> Macro.prewalk(fn
+        {:__aliases__, meta, parts} -> {:__aliases__, meta, [List.last(parts)]}
+        module when is_atom(module) -> short_module(module)
+        node -> node
+      end)
+      # On one line, however long.
+      |> Code.quoted_to_algebra()
+      |> Inspect.Algebra.format(:infinity)
+      |> IO.iodata_to_binary()
+      |> String.split()
+      |> Enum.join(" ")
+
+    # An operator's spec (`left <~> right :: ...`) keeps its name, which sits between the arguments.
+    if String.starts_with?(text, "#{name}("),
+      do: String.replace_prefix(text, Atom.to_string(name), ""),
+      else: text
+  end
+
+  defp short_module(atom) do
+    case Atom.to_string(atom) do
+      "Elixir." <> _ ->
+        {:__aliases__, [], [atom |> Module.split() |> List.last() |> String.to_atom()]}
+
+      _ ->
+        atom
     end
   end
 

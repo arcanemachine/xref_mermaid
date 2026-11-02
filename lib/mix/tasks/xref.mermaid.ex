@@ -40,6 +40,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--link TEMPLATE` - makes each function a link: `{path}` (absolute, URL-encoded) and `{line}`, e.g.
       `vscode://file{path}:{line}`
     * `--legend` - adds a legend
+    * `--details` - adds each function's first `@spec` and the first paragraph of its `@doc`, cut short
+    * `--call-order` - numbers each function's calls in the order its code makes them
 
   Regenerating overwrites the output file.
 
@@ -70,7 +72,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
           expanded: :boolean,
           collapsed: :boolean,
           link: :string,
-          legend: :boolean
+          legend: :boolean,
+          details: :boolean,
+          call_order: :boolean
         ],
         aliases: [o: :output]
       )
@@ -127,7 +131,18 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
       opts[:overview] &&
           Enum.any?(
-            [:depth, :incoming, :all_functions, :external, :expanded, :collapsed, :link, :legend],
+            [
+              :depth,
+              :incoming,
+              :all_functions,
+              :external,
+              :expanded,
+              :collapsed,
+              :link,
+              :legend,
+              :details,
+              :call_order
+            ],
             &Keyword.has_key?(opts, &1)
           ) ->
         Mix.raise("--overview takes only --level and --output")

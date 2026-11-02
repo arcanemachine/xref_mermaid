@@ -46,7 +46,9 @@ defmodule XrefMermaid.TestProject do
       arities: arities,
       kind: kind,
       line: line,
-      generated?: generated == [generated: true]
+      generated?: generated == [generated: true],
+      doc: nil,
+      specs: []
     }
   end
 end

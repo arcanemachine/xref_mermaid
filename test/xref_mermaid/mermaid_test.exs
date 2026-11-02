@@ -252,6 +252,44 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~ ~s(f_edge_two__Bar__b_0["Bar.b/0"])
   end
 
+  test "write/3 with `details` adds the first spec and the doc's first paragraph, cut short" do
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 1}, {:count, [0], :def, 2}], []}
+      ])
+
+    project =
+      update_in(project.functions[{Shop.Orders, :place, 1}], fn function ->
+        %{
+          function
+          | doc: "Places an order\nfor <you>.\n\nMore.",
+            specs: ["(" <> String.duplicate("x", 90) <> ") :: :ok", "(Order.t()) :: :ok"]
+        }
+      end)
+
+    selection = Selection.select(project, prefixes: ["lib/"], all_functions: true)
+
+    assert Mermaid.write(project, selection, details: true) =~
+             ~s{f_orders__place_1["place/1<br>(#{String.duplicate("x", 78)}… (+1)<br>Places an order for #lt;you#gt;."]\n} <>
+               ~s{        f_orders__count_0["count/0"]\n}
+
+    assert Mermaid.write(project, selection) =~ ~s(f_orders__place_1["place/1"]\n)
+  end
+
+  test "write/3 with `call_order` numbers a function's calls in the order its code makes them" do
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex",
+         [{:place, [1], :def, 1}, {:a, [0], :def, 2}, {:b, [0], :def, 3}],
+         [{{:place, 1}, {Shop.Orders, :b, 0}}, {{:place, 1}, {Shop.Orders, :a, 0}}]}
+      ])
+
+    text = Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]), call_order: true)
+
+    assert text =~ "f_orders__place_1 -->|2| f_orders__a_0\n"
+    assert text =~ "f_orders__place_1 -->|1| f_orders__b_0\n"
+  end
+
   test "write/3 names operator characters in ids" do
     project =
       TestProject.build([{Ops, "lib/ops.ex", [{:<~>, [2], :def, 1}, {:"<|>", [2], :def, 2}], []}])

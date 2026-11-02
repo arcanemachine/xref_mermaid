@@ -56,6 +56,10 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   `{line}` the line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
   `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart can't change it).
 - `--legend`: adds a legend.
+- `--details`: adds two lines under each function's name: its first `@spec` (with `(+N)` when it has more), without
+  the name and with module names cut to their last part, and the first paragraph of its `@doc`, each cut to 80
+  characters. Labels grow, so it reads best on a few files or a `--from` walk.
+- `--call-order`: numbers each function's calls (`-->|1|`) in the order its code first makes them.
 
 ### Version check
 
@@ -86,6 +90,7 @@ Mermaid draws at most 50,000 characters and 500 arrows by default; the task warn
 - Files and their dependency kinds: `mix xref graph --format dot`.
 - Functions and calls: the Elixir debug info in the project's `.beam` files, which Mix keeps by default. The task
   warns about modules without it.
+- Docs and specs (`--details`): the `.beam` files' docs chunk and debug info.
 
 What it can't see:
 

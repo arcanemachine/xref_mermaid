@@ -23,6 +23,8 @@ defmodule XrefMermaid.Mermaid do
       long); otherwise every file is open
     * `:link` - a URL template for a `click` link on each function: `{path}` (absolute, URL-encoded) and `{line}`
     * `:legend` - adds a legend subgraph
+    * `:details` - adds each function's first `@spec` and the start of its `@doc` to its label
+    * `:call_order` - numbers each function's calls in the order its code makes them
 
   A file holding a start function (`from`/`to`) is never collapsed.
   """
@@ -74,13 +76,30 @@ defmodule XrefMermaid.Mermaid do
     shown_keys = selection.files |> Map.values() |> List.flatten()
     functions = Enum.map(shown_keys, &project.functions[&1])
 
+    # The order of a function's first call to each callee, among the calls drawn.
+    call_numbers =
+      if opts[:call_order] do
+        for {caller, calls} <- Enum.group_by(selection.calls, &elem(&1, 0)),
+            order = project.forward |> Map.get(caller, []) |> Enum.with_index() |> Map.new(),
+            {call, number} <- calls |> Enum.sort_by(&order[elem(&1, 1)]) |> Enum.with_index(1),
+            into: %{},
+            do: {call, number}
+      else
+        %{}
+      end
+
     IO.iodata_to_binary([
       "flowchart LR\n",
       # Files at the project root sit at the top level, outside any directory.
       Enum.map(Enum.sort(Map.get(context.files_in, ".", [])), &render_file(&1, "  ", context)),
       Enum.map(roots, &render_dir(&1, 1, context)),
       render_externals(externals, ids),
-      Enum.map(selection.calls, fn {caller, callee} -> "  #{ids[caller]} --> #{ids[callee]}\n" end),
+      Enum.map(selection.calls, fn {caller, callee} = call ->
+        case call_numbers[call] do
+          nil -> "  #{ids[caller]} --> #{ids[callee]}\n"
+          number -> "  #{ids[caller]} -->|#{number}| #{ids[callee]}\n"
+        end
+      end),
       Enum.map(selection.file_edges, fn {source, sink, kind} ->
         {open, close} = @file_arrows[kind]
         "  #{ids[{:file, source}]} #{open} #{kind} #{close} #{ids[{:file, sink}]}\n"
@@ -184,12 +203,41 @@ defmodule XrefMermaid.Mermaid do
           function = context.project.functions[key]
           {label_prefix, _} = parts[function.module]
           label = "#{label_prefix}#{function.name}/#{arities(function)}"
-          ~s(#{pad}  #{ids[key]}["#{escape(label)}"]\n)
+          ~s(#{pad}  #{ids[key]}["#{details(label, function, opts)}"]\n)
         end),
         "#{pad}end\n",
         if(collapsed?, do: "#{pad}#{file_id}@{ view: collapsed }\n", else: "")
       ]
     end
+  end
+
+  # With `:details`, the label gains the function's first spec and its doc's first paragraph, each on a line of its
+  # own and cut short.
+  defp details(label, function, opts) do
+    lines =
+      if opts[:details] do
+        spec =
+          case function.specs do
+            [] -> nil
+            [spec] -> cut(spec)
+            [spec | more] -> cut(spec) <> " (+#{length(more)})"
+          end
+
+        doc =
+          function.doc && function.doc |> String.trim() |> String.split("\n\n") |> hd() |> cut()
+
+        [label, spec, doc]
+      else
+        [label]
+      end
+
+    lines |> Enum.reject(&(&1 in [nil, ""])) |> Enum.map_join("<br>", &escape/1)
+  end
+
+  # The text goes on one line, at most 80 characters.
+  defp cut(text) do
+    text = text |> String.split() |> Enum.join(" ")
+    if String.length(text) > 80, do: String.slice(text, 0, 79) <> "…", else: text
   end
 
   defp render_externals([], _ids), do: ""

@@ -5,10 +5,13 @@ defmodule XrefMermaid.BeamTest do
   alias XrefMermaid.Beam
 
   setup do
-    # `mix test` compiles without debug info, which `Beam.read/1` reads.
-    previous = Code.get_compiler_option(:debug_info)
-    Code.put_compiler_option(:debug_info, true)
-    on_exit(fn -> Code.put_compiler_option(:debug_info, previous) end)
+    # `mix test` compiles without debug info and docs, which `Beam.read/1` reads.
+    previous = Map.new([:debug_info, :docs], &{&1, Code.get_compiler_option(&1)})
+    Enum.each(previous, fn {option, _} -> Code.put_compiler_option(option, true) end)
+
+    on_exit(fn ->
+      Enum.each(previous, fn {option, value} -> Code.put_compiler_option(option, value) end)
+    end)
   end
 
   defp read(source) do
@@ -41,6 +44,31 @@ defmodule XrefMermaid.BeamTest do
              {:total, [1], :def, false},
              {:twice, [1], :defmacro, false},
              {:check, [1], :defp, false}
+           ]
+  end
+
+  test "reads docs, and specs shortened for a label" do
+    [module] =
+      read("""
+      defmodule BeamTest.Docs do
+        @doc "Places an order."
+        @spec place(BeamTest.Docs.Order.t(), keyword()) :: {:ok, String.t()} | :error
+        @spec place(BeamTest.Docs.Order.t()) :: :error
+        def place(order, opts \\\\ []), do: {order, opts}
+
+        @spec left <~> right :: :ok when left: term(), right: term()
+        def left <~> right, do: {left, right}
+
+        @doc false
+        def hidden, do: :ok
+      end
+      """)
+
+    assert Enum.map(module.functions, &{&1.name, &1.doc, &1.specs}) == [
+             {:place, "Places an order.",
+              ["(Order.t(), keyword()) :: {:ok, String.t()} | :error", "(Order.t()) :: :error"]},
+             {:<~>, nil, ["left <~> right :: :ok when left: term(), right: term()"]},
+             {:hidden, nil, []}
            ]
   end
 
