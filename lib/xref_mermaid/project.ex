@@ -25,9 +25,9 @@ defmodule XrefMermaid.Project do
   @doc """
   Compiles the current Mix project and reads its file graph (`mix xref graph`) and its compiled modules.
 
-  Returns `{project, warnings}`.
+  With `details: true`, functions also get their docs and specs. Returns `{project, warnings}`.
   """
-  def load do
+  def load(opts \\ []) do
     Mix.Project.get!()
 
     if Mix.Project.umbrella?() do
@@ -56,7 +56,7 @@ defmodule XrefMermaid.Project do
 
     # Erlang modules (from `src/`) are left out: they have no Elixir debug info to read.
     beams = Path.wildcard(Path.join(Mix.Project.compile_path(), "Elixir.*.beam"))
-    modules = beams |> Enum.map(&Beam.read(String.to_charlist(&1))) |> Enum.reject(&is_nil/1)
+    modules = beams |> Enum.map(&Beam.read(File.read!(&1), opts)) |> Enum.reject(&is_nil/1)
     project = new(file_edges, modules, root)
     {project, load_warnings(project, modules, length(beams))}
   end

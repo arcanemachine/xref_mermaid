@@ -52,7 +52,7 @@ defmodule XrefMermaid.VersionCheck do
       customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
     ]
 
-    case :httpc.request(:get, {url, headers}, [timeout: 3000, connect_timeout: 2000, ssl: ssl],
+    case :httpc.request(:get, {url, headers}, [timeout: 1500, connect_timeout: 1000, ssl: ssl],
            body_format: :binary
          ) do
       {:ok, {{_, 200, _}, _, body}} ->

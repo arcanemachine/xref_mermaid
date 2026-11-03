@@ -95,6 +95,16 @@ defmodule XrefMermaid.IntegrationTest do
     refute text =~ "f_receipt"
   end
 
+  test "adds specs and docs, and numbers calls in the order the code runs them", context do
+    {text, _log} = chart(["--from", "Sample.Repo.save/1", "--details", "--call-order"], context)
+
+    assert text =~
+             ~s|f_repo__save_1["save/1<br>(Orders.t()) :: {:ok, Orders.t()}<br>Saves a record."]|
+
+    assert text =~ "f_repo__save_1 -->|1| f_repo__changeset_1"
+    assert text =~ "f_repo__save_1 -->|2| f_repo__insert_1"
+  end
+
   test "passes the drawing options through", context do
     args = [
       "lib/sample/totals.ex",
@@ -133,6 +143,7 @@ defmodule XrefMermaid.IntegrationTest do
     assert failure(["lib/", "--expanded", "--collapsed"], context) =~ "not both"
     assert failure(["--overview", "lib/"], context) =~ "--overview draws the whole project"
     assert failure(["--overview", "--legend"], context) =~ "--overview takes only --level"
+    assert failure(["--overview", "--details"], context) =~ "--overview takes only --level"
     assert failure(["lib/", "--level", "2"], context) =~ "--level goes with --overview"
     assert failure(["--overview", "--level", "0"], context) =~ "--level must be 1 or more"
     assert failure(["lib/", "--depth", "2"], context) =~ "--depth goes with --from or --to"

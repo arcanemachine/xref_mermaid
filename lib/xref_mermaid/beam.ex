@@ -6,7 +6,8 @@ defmodule XrefMermaid.Beam do
 
   @doc """
   Returns `%{module: module, file: absolute_path, line: line, impl: impl, functions: functions, calls: calls}`, or
-  `nil` when `beam` (a charlist path or the module's binary) has no Elixir debug info.
+  `nil` when `binary` (a `.beam` file's content) has no Elixir debug info. With `details: true`, functions also get
+  their docs and specs.
 
   `line` is the line of the module's `defmodule`. `impl` is `{protocol, for}` for a protocol implementation, and
   `nil` for any other module.
@@ -20,9 +21,9 @@ defmodule XrefMermaid.Beam do
   `calls` holds `{{name, arity}, {module, name, arity}}`: the caller in this module and the function called,
   once per pair, recursion left out. Calls through a variable (`apply/3`, `module.fun()`) can't be resolved.
   """
-  def read(beam) do
+  def read(binary, opts \\ []) do
     with {:ok, {module, [debug_info: {:debug_info_v1, backend, data}]}} <-
-           :beam_lib.chunks(beam, [:debug_info]),
+           :beam_lib.chunks(binary, [:debug_info]),
          {:ok, info} <- backend.debug_info(:elixir_v1, module, data, []) do
       # A protocol implementation answers `__impl__(:protocol)` and `__impl__(:for)`.
       impl =
@@ -52,9 +53,7 @@ defmodule XrefMermaid.Beam do
             into: %{},
             do: {{name, kind, lower}, arity}
 
-      binary = if is_binary(beam), do: beam, else: File.read!(beam)
-      docs = docs(binary)
-      specs = specs(binary)
+      {docs, specs} = if opts[:details], do: {docs(binary), specs(binary)}, else: {%{}, %{}}
 
       functions =
         for {{name, arity}, kind, meta, _} <- definitions,
@@ -69,7 +68,10 @@ defmodule XrefMermaid.Beam do
             generated?: meta[:context] != nil,
             doc: docs[{name, arity}],
             # A function with default arguments may have a spec for each arity; the full arity's comes first.
-            specs: arities |> Enum.reverse() |> Enum.flat_map(&Map.get(specs, {name, &1}, []))
+            specs:
+              arities
+              |> Enum.reverse()
+              |> Enum.flat_map(&Map.get(specs, {name, kind in [:defmacro, :defmacrop], &1}, []))
           }
         end
         |> Enum.sort_by(&{&1.line, &1.arities})
@@ -113,23 +115,33 @@ defmodule XrefMermaid.Beam do
     end
   end
 
-  # Returns `%{{name, arity} => [spec text]}`. A macro's spec is under its arity plus one (its caller argument).
+  # Returns `%{{name, macro?, arity} => [spec text]}`.
   defp specs(binary) do
     case Code.Typespec.fetch_specs(binary) do
       {:ok, specs} ->
-        Map.new(specs, fn {{name, arity}, specs} ->
-          {{name, arity}, Enum.map(specs, &spec_text(name, &1))}
-        end)
+        for {{name, arity}, specs} <- specs, into: %{} do
+          # A macro's spec is stored as `MACRO-name`, with the caller's environment as an extra first argument.
+          case Atom.to_string(name) do
+            "MACRO-" <> macro ->
+              macro = String.to_atom(macro)
+              {{macro, true, arity - 1}, Enum.map(specs, &spec_text(macro, &1, true))}
+
+            _ ->
+              {{name, false, arity}, Enum.map(specs, &spec_text(name, &1, false))}
+          end
+        end
 
       :error ->
         %{}
     end
   end
 
-  defp spec_text(name, spec) do
+  defp spec_text(name, spec, macro?) do
+    quoted = Code.Typespec.spec_to_quoted(name, spec)
+    quoted = if macro?, do: drop_caller(quoted), else: quoted
+
     text =
-      name
-      |> Code.Typespec.spec_to_quoted(spec)
+      quoted
       |> Macro.prewalk(fn
         {:__aliases__, meta, parts} -> {:__aliases__, meta, [List.last(parts)]}
         module when is_atom(module) -> short_module(module)
@@ -148,6 +160,11 @@ defmodule XrefMermaid.Beam do
       else: text
   end
 
+  defp drop_caller({:when, meta, [spec, guards]}), do: {:when, meta, [drop_caller(spec), guards]}
+
+  defp drop_caller({:"::", meta, [{name, head_meta, [_caller | args]}, result]}),
+    do: {:"::", meta, [{name, head_meta, args}, result]}
+
   defp short_module(atom) do
     case Atom.to_string(atom) do
       "Elixir." <> _ ->
@@ -163,30 +180,41 @@ defmodule XrefMermaid.Beam do
     String.starts_with?(name, "__") and String.ends_with?(name, "__")
   end
 
+  # Calls are taken after their arguments, in the order the code runs them: `x |> f() |> g()`, compiled to
+  # `g(f(x))`, calls `f/1` first.
   defp calls_in(ast, module, defined) do
     {_, calls} =
-      Macro.prewalk(ast, [], fn
-        # A capture is replaced by `:ok`, so the capture's inner call node isn't read again as a call with no
-        # arguments.
-        {:&, _, [{:/, _, [{{:., _, [callee, name]}, _, []}, arity]}]}, calls when is_atom(callee) ->
-          {:ok, [{callee, name, arity} | calls]}
+      Macro.traverse(
+        ast,
+        [],
+        fn
+          # A capture is replaced by `:ok`, so the capture's inner call node isn't read again as a call with no
+          # arguments.
+          {:&, _, [{:/, _, [{{:., _, [callee, name]}, _, []}, arity]}]}, calls
+          when is_atom(callee) ->
+            {:ok, [{callee, name, arity} | calls]}
 
-        {:&, _, [{:/, _, [{name, _, context}, arity]}]}, calls when is_atom(context) ->
-          {:ok, [{module, name, arity} | calls]}
+          {:&, _, [{:/, _, [{name, _, context}, arity]}]}, calls when is_atom(context) ->
+            {:ok, [{module, name, arity} | calls]}
 
-        {{:., _, [callee, name]}, _, args} = node, calls
-        when is_atom(callee) and is_atom(name) and is_list(args) ->
-          {node, [{callee, name, length(args)} | calls]}
+          node, calls ->
+            {node, calls}
+        end,
+        fn
+          {{:., _, [callee, name]}, _, args} = node, calls
+          when is_atom(callee) and is_atom(name) and is_list(args) ->
+            {node, [{callee, name, length(args)} | calls]}
 
-        # A local call; special forms (`case`, `=`, ...) share this shape and aren't among the module's functions.
-        {name, _, args} = node, calls when is_atom(name) and is_list(args) ->
-          if {name, length(args)} in defined,
-            do: {node, [{module, name, length(args)} | calls]},
-            else: {node, calls}
+          # A local call; special forms (`case`, `=`, ...) share this shape and aren't among the module's functions.
+          {name, _, args} = node, calls when is_atom(name) and is_list(args) ->
+            if {name, length(args)} in defined,
+              do: {node, [{module, name, length(args)} | calls]},
+              else: {node, calls}
 
-        node, calls ->
-          {node, calls}
-      end)
+          node, calls ->
+            {node, calls}
+        end
+      )
 
     Enum.reverse(calls)
   end

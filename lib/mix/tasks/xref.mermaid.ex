@@ -88,7 +88,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     # The check runs before compiling, which prunes the code path of the applications the check uses.
     version_warnings = VersionCheck.warnings()
-    {project, warnings} = Project.load()
+    {project, warnings} = Project.load(details: opts[:details] == true)
     text = if opts[:overview], do: overview(project, opts), else: chart(project, prefixes, opts)
 
     with {:error, reason} <- File.write(output, text) do

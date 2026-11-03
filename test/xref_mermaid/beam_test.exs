@@ -15,7 +15,9 @@ defmodule XrefMermaid.BeamTest do
   end
 
   defp read(source) do
-    source |> Code.compile_string() |> Enum.map(fn {_, binary} -> Beam.read(binary) end)
+    source
+    |> Code.compile_string()
+    |> Enum.map(fn {_, binary} -> Beam.read(binary, details: true) end)
   end
 
   test "lists functions, merging default arities and keeping operators and delegates" do
@@ -61,6 +63,10 @@ defmodule XrefMermaid.BeamTest do
 
         @doc false
         def hidden, do: :ok
+
+        @doc "Twice."
+        @spec twice(term()) :: term()
+        defmacro twice(x), do: x
       end
       """)
 
@@ -68,7 +74,30 @@ defmodule XrefMermaid.BeamTest do
              {:place, "Places an order.",
               ["(Order.t(), keyword()) :: {:ok, String.t()} | :error", "(Order.t()) :: :error"]},
              {:<~>, nil, ["left <~> right :: :ok when left: term(), right: term()"]},
-             {:hidden, nil, []}
+             {:hidden, nil, []},
+             {:twice, "Twice.", ["(term()) :: term()"]}
+           ]
+  end
+
+  test "lists calls in the order the code runs them" do
+    [module] =
+      read("""
+      defmodule BeamTest.Order do
+        def save(record), do: record |> check() |> Enum.map(&normalize/1) |> insert(nested(record))
+
+        defp check(record), do: record
+        defp normalize(item), do: item
+        defp nested(record), do: record
+        defp insert(records, _), do: records
+      end
+      """)
+
+    assert module.calls == [
+             {{:save, 1}, {BeamTest.Order, :check, 1}},
+             {{:save, 1}, {BeamTest.Order, :normalize, 1}},
+             {{:save, 1}, {Enum, :map, 2}},
+             {{:save, 1}, {BeamTest.Order, :nested, 1}},
+             {{:save, 1}, {BeamTest.Order, :insert, 2}}
            ]
   end
 
