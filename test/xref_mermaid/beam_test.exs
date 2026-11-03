@@ -67,6 +67,9 @@ defmodule XrefMermaid.BeamTest do
         @doc "Twice."
         @spec twice(term()) :: term()
         defmacro twice(x), do: x
+
+        @spec same(t) :: t when t: term()
+        defmacro same(x), do: x
       end
       """)
 
@@ -75,7 +78,8 @@ defmodule XrefMermaid.BeamTest do
               ["(Order.t(), keyword()) :: {:ok, String.t()} | :error", "(Order.t()) :: :error"]},
              {:<~>, nil, ["left <~> right :: :ok when left: term(), right: term()"]},
              {:hidden, nil, []},
-             {:twice, "Twice.", ["(term()) :: term()"]}
+             {:twice, "Twice.", ["(term()) :: term()"]},
+             {:same, nil, ["(t) :: t when t: term()"]}
            ]
   end
 
@@ -99,6 +103,19 @@ defmodule XrefMermaid.BeamTest do
              {{:save, 1}, {BeamTest.Order, :nested, 1}},
              {{:save, 1}, {BeamTest.Order, :insert, 2}}
            ]
+  end
+
+  test "reads a binary segment's size and unit as modifiers, not calls" do
+    [module] =
+      read("""
+      defmodule BeamTest.Binary do
+        def size(x), do: x
+        def width(x), do: x
+        def parse(<<a::size(8), _::binary>>), do: <<a::size(width(a))-unit(8)>>
+      end
+      """)
+
+    assert module.calls == [{{:parse, 1}, {BeamTest.Binary, :width, 1}}]
   end
 
   test "reads local, remote and captured calls, without recursion" do

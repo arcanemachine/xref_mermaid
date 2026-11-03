@@ -197,6 +197,16 @@ defmodule XrefMermaid.Beam do
           {:&, _, [{:/, _, [{name, _, context}, arity]}]}, calls when is_atom(context) ->
             {:ok, [{module, name, arity} | calls]}
 
+          # A binary segment's `size(n)` and `unit(n)` modifiers have a call's shape; only their argument is read.
+          {:"::", meta, [value, modifiers]}, calls ->
+            modifiers =
+              Macro.prewalk(modifiers, fn
+                {modifier, _, [argument]} when modifier in [:size, :unit] -> argument
+                node -> node
+              end)
+
+            {{:"::", meta, [value, modifiers]}, calls}
+
           node, calls ->
             {node, calls}
         end,
