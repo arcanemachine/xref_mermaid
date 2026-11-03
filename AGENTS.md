@@ -12,6 +12,8 @@ file, and where the two differ, the local file wins.
   `.beam` debug info through `beam.ex`) into one model, independent of any chart.
 - `lib/xref_mermaid/selection.ex`: picks what to draw (path slices, `--from`/`--to` walks, the overview).
 - `lib/xref_mermaid/mermaid.ex`: writes a selection as Mermaid text (ids, labels, classes, collapse lines, links).
+- `lib/xref_mermaid/version_check.ex`: the opt-in check for a newer commit on GitHub (`XREF_MERMAID_VERSION_CHECK=1`);
+  a development feature, kept in one module so it is easy to remove.
 
 ## Rules
 
