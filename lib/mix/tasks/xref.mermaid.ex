@@ -24,8 +24,10 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--to MOD.FUN/ARITY` - the calls made to the function, followed up to `--depth` hops back (repeatable)
     * `--depth N` - hops for `--from` and `--to` (default 3)
     * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
-    * `--overview` - instead of all the above; takes only `--level` (default 2): one node per directory
-      `--level` deep, arrows between them
+    * `--exclude PREFIX` - leaves out the files whose paths start with it, and every call to or from them, in
+      every mode (repeatable)
+    * `--overview` - instead of all the above; takes only `--level` (default 2) and `--exclude`: one node per
+      directory `--level` deep, arrows between them
 
   ## How to draw it
 
@@ -74,7 +76,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
           link: :string,
           legend: :boolean,
           details: :boolean,
-          call_order: :boolean
+          call_order: :boolean,
+          exclude: :keep
         ],
         aliases: [o: :output]
       )
@@ -88,8 +91,14 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     # The check runs before compiling, which prunes the code path of the applications the check uses.
     version_warnings = VersionCheck.warnings()
-    {project, warnings} = Project.load(details: opts[:details] == true)
-    text = if opts[:overview], do: overview(project, opts), else: chart(project, prefixes, opts)
+    {full_project, warnings} = Project.load(details: opts[:details] == true)
+    {excludes, exclude_warnings} = excludes(full_project, opts)
+    project = Project.exclude(full_project, excludes)
+
+    text =
+      if opts[:overview],
+        do: overview(project, opts),
+        else: chart(project, full_project, prefixes, opts)
 
     with {:error, reason} <- File.write(output, text) do
       Mix.raise("Can't write #{output}: #{:file.format_error(reason)}")
@@ -97,6 +106,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     warnings =
       warnings ++
+        exclude_warnings ++
         umbrella_warnings(project, opts) ++
         Mermaid.limit_warnings(text) ++
         version_warnings
@@ -145,7 +155,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
             ],
             &Keyword.has_key?(opts, &1)
           ) ->
-        Mix.raise("--overview takes only --level and --output")
+        Mix.raise("--overview takes only --level, --exclude and --output")
 
       !opts[:overview] and prefixes == [] and not from_or_to? ->
         Mix.raise("Give path prefixes, --from, --to or --overview")
@@ -177,42 +187,73 @@ defmodule Mix.Tasks.Xref.Mermaid do
     project |> Selection.overview(Keyword.get(opts, :level, 2)) |> Mermaid.write_overview()
   end
 
-  defp chart(project, prefixes, opts) do
+  # An exclusion that matches no file only warns: the same exclusions are often reused across runs.
+  defp excludes(project, opts) do
+    opts
+    |> Keyword.get_values(:exclude)
+    |> Enum.map(fn prefix ->
+      relative = relative_prefix(prefix, project)
+
+      if matches_file?(project, relative),
+        do: {relative, nil},
+        else: {relative, "--exclude #{prefix} matches no file of the project"}
+    end)
+    |> Enum.unzip()
+    |> then(fn {excludes, warnings} -> {excludes, Enum.reject(warnings, &is_nil/1)} end)
+  end
+
+  defp chart(project, full_project, prefixes, opts) do
     prefixes = Enum.map(prefixes, &relative_prefix!(&1, project))
+    resolve = &resolve!(project, full_project, &1)
 
     selection_opts =
       [
         prefixes: prefixes,
-        from: opts |> Keyword.get_values(:from) |> Enum.flat_map(&resolve!(project, &1)),
-        to: opts |> Keyword.get_values(:to) |> Enum.flat_map(&resolve!(project, &1))
+        from: opts |> Keyword.get_values(:from) |> Enum.flat_map(resolve),
+        to: opts |> Keyword.get_values(:to) |> Enum.flat_map(resolve)
       ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
 
     Mermaid.write(project, Selection.select(project, selection_opts), opts)
   end
 
-  # Prefixes are compared with the paths `mix xref` gives, which are relative to the app's directory.
   defp relative_prefix!(prefix, project) do
-    # The app's directory itself (`.`) is the empty prefix, which every file starts with.
-    relative =
-      case Path.relative_to(Path.expand(prefix), project.root) do
-        "." -> ""
-        relative -> if String.ends_with?(prefix, "/"), do: relative <> "/", else: relative
-      end
+    relative = relative_prefix(prefix, project)
 
-    if not Enum.any?(Map.keys(project.file_edges), &String.starts_with?(&1, relative)) do
+    if not matches_file?(project, relative) do
       Mix.raise("No file of the project starts with #{prefix}")
     end
 
     relative
   end
 
-  defp resolve!(project, spec) do
+  # Prefixes are compared with the paths `mix xref` gives, which are relative to the app's directory.
+  defp relative_prefix(prefix, project) do
+    # The app's directory itself (`.`) is the empty prefix, which every file starts with.
+    case Path.relative_to(Path.expand(prefix), project.root) do
+      "." -> ""
+      relative -> if String.ends_with?(prefix, "/"), do: relative <> "/", else: relative
+    end
+  end
+
+  defp matches_file?(project, prefix),
+    do: Enum.any?(Map.keys(project.file_edges), &String.starts_with?(&1, prefix))
+
+  # `full_project` is the project before `--exclude`, to say when a function is missing because it was excluded.
+  defp resolve!(project, full_project, spec) do
     with {:ok, parsed} <- Project.parse_spec(spec),
          {:ok, keys} <- Project.resolve(project, parsed) do
       keys
     else
-      :error -> Mix.raise("Can't read #{inspect(spec)}: give MOD.FUN/ARITY or MOD.FUN")
-      {:error, message} -> Mix.raise(message)
+      :error ->
+        Mix.raise("Can't read #{inspect(spec)}: give MOD.FUN/ARITY or MOD.FUN")
+
+      {:error, message} ->
+        with {:ok, parsed} <- Project.parse_spec(spec),
+             {:ok, _} <- Project.resolve(full_project, parsed) do
+          Mix.raise("#{spec} is in a file left out by --exclude")
+        end
+
+        Mix.raise(message)
     end
   end
 end

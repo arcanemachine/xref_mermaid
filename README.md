@@ -36,6 +36,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--to MOD.FUN/ARITY`: the calls made to the function, followed up to `--depth` hops back. Repeatable.
   `--from` and `--to` name functions of the project (not of its dependencies); an unknown one stops the task and
   names the closest matches.
+- `--exclude PREFIX`: leaves out the files whose paths start with it (matched as text, like path prefixes), and every
+  call to or from them, in every mode, `--overview` included. Repeatable. One that matches no file only warns.
 - `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
 - `--overview`: instead, one node per directory `--level` deep (default 2: `lib/my_app/`), with an arrow per pair of
   directories labeled with the strongest dependency kind and the number of file dependencies. Files directly in a

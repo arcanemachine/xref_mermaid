@@ -133,6 +133,24 @@ defmodule XrefMermaid.IntegrationTest do
     assert text =~ "d_lib_sample__ -. runtime ×1 .-> d_lib_sample_a_"
   end
 
+  test "leaves out excluded files, and warns on an exclusion that matches nothing", context do
+    {text, log} =
+      chart(
+        ["lib/sample/orders.ex", "--exclude", "lib/sample/repo", "--exclude", "lib/nope"],
+        context
+      )
+
+    assert text =~ "f_orders__place_1"
+    refute text =~ "repo"
+    assert log =~ "warning: --exclude lib/nope matches no file of the project"
+
+    {text, _log} = chart(["--overview", "--level", "3", "--exclude", "lib/sample/a/"], context)
+    refute text =~ "lib/sample/a/"
+
+    assert failure(["--from", "Sample.Repo.save/1", "--exclude", "lib/sample/repo.ex"], context) =~
+             "Sample.Repo.save/1 is in a file left out by --exclude"
+  end
+
   test "stops with a message on what it can't draw", context do
     assert failure(["--from", "Sample.Orders.plcae/2"], context) =~
              ~r/No function Sample.Orders.plcae\/2 in the project. Closest: .*Sample.Orders.place\/1/

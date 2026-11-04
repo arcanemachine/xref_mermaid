@@ -83,6 +83,30 @@ defmodule XrefMermaid.ProjectTest do
            }
   end
 
+  test "exclude/2 drops the files, their functions and every call to or from them" do
+    project =
+      TestProject.build(
+        [
+          {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 2}],
+           [{{:place, 1}, {Shop.Repo, :insert, 1}}, {{:place, 1}, {Enum, :map, 2}}]},
+          {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}], []},
+          {Shop.Audit, "lib/shop/audit.ex", [{:log, [1], :def, 2}],
+           [{{:log, 1}, {Shop.Orders, :place, 1}}]}
+        ],
+        %{"lib/shop/orders.ex" => %{"lib/shop/repo.ex" => "runtime"}}
+      )
+
+    project = Project.exclude(project, ["lib/shop/repo", "lib/shop/audit.ex"])
+
+    assert project.file_edges == %{"lib/shop/orders.ex" => %{}}
+    assert Map.keys(project.functions) == [{Shop.Orders, :place, 1}]
+    assert Map.keys(project.modules) == [Shop.Orders]
+    assert Map.keys(project.modules_in) == ["lib/shop/orders.ex"]
+    assert project.forward == %{{Shop.Orders, :place, 1} => [{:external, {Enum, :map, 2}}]}
+    assert project.backward == %{{:external, {Enum, :map, 2}} => [{Shop.Orders, :place, 1}]}
+    assert {:error, _} = Project.resolve(project, {Shop.Repo, :insert, 1})
+  end
+
   test "load_warnings/3 counts modules without debug info and modules whose files xref doesn't list" do
     project = TestProject.build([{A, "lib/a.ex", [], []}])
 

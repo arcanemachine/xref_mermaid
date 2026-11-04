@@ -150,6 +150,45 @@ defmodule XrefMermaid.Project do
   end
 
   @doc """
+  Drops the files whose paths start with one of `prefixes`: their file dependencies both ways, their modules and
+  functions, and every call to or from them.
+  """
+  def exclude(project, []), do: project
+
+  def exclude(project, prefixes) do
+    out? = fn file -> Enum.any?(prefixes, &String.starts_with?(file, &1)) end
+
+    functions = Map.reject(project.functions, fn {_, function} -> out?.(function.file) end)
+    kept? = &(match?({:external, _}, &1) or Map.has_key?(functions, &1))
+
+    keep_calls = fn edges ->
+      for {key, others} <- edges,
+          kept?.(key),
+          others = Enum.filter(others, kept?),
+          others != [],
+          into: %{},
+          do: {key, others}
+    end
+
+    %{
+      project
+      | file_edges:
+          for(
+            {source, sinks} <- project.file_edges,
+            not out?.(source),
+            into: %{},
+            do: {source, Map.reject(sinks, fn {sink, _} -> out?.(sink) end)}
+          ),
+        functions: functions,
+        index: Map.filter(project.index, fn {_, key} -> Map.has_key?(functions, key) end),
+        modules: Map.reject(project.modules, fn {_, module} -> out?.(module.file) end),
+        modules_in: Map.reject(project.modules_in, fn {file, _} -> out?.(file) end),
+        forward: keep_calls.(project.forward),
+        backward: keep_calls.(project.backward)
+    }
+  end
+
+  @doc """
   Finds the functions `spec` names: `{module, name, arity}`, or `{module, name, nil}` for every arity.
 
   Returns `{:ok, [key]}` or `{:error, message}` naming the closest matches.
