@@ -40,8 +40,10 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   call to or from them, in every mode, `--overview` included. Repeatable. One that matches no file only warns.
 - `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
 - `--overview`: instead, one node per directory `--level` deep (default 2: `lib/my_app/`), with an arrow per pair of
-  directories labeled with the strongest dependency kind and the number of file dependencies. Files directly in a
-  shallower directory form their own node: at level 2, `lib/my_app.ex` is in `lib/*`.
+  directories labeled with the strongest dependency kind and the number of file dependencies. A file goes with the
+  directory named after it, a module with its children: at level 2, `lib/my_app.ex` is in `lib/my_app/`; at level 4,
+  `lib/my_app/orders.ex` is in `lib/my_app/orders/*`, with the files directly in `lib/my_app/orders/`. Other files
+  directly in a shallower directory form their own node: at level 2, `lib/tools.ex` is in `lib/*`.
 
 ### How to draw it
 

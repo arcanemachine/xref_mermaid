@@ -150,15 +150,28 @@ defmodule XrefMermaid.Selection do
   @doc """
   Groups the project's files into directories `level` deep (counted from the project root, so `lib/my_app/` is 2)
   and returns `%{dirs: [dir], edges: [{source_dir, sink_dir, kind, count}]}`: one edge per pair of directories,
-  with the strongest kind among its file dependencies (compile, then export, then runtime) and their count.
+  with the strongest kind among its file dependencies (compile, then export, then runtime) and their count. A file
+  goes with the directory named after it when there is one (`lib/my_app/orders.ex` with `lib/my_app/orders/`).
   """
   def overview(project, level) do
     # Files in a directory shallower than `level` form their own group, `dir/*`, apart from its subdirectories;
     # files at the root are `./*`.
-    dir_of = fn file ->
+    group_of = fn file ->
       parts = if Path.dirname(file) == ".", do: [], else: file |> Path.dirname() |> Path.split()
       name = if parts == [], do: ".", else: parts |> Enum.take(level) |> Path.join()
       name <> if(length(parts) < level, do: "/*", else: "/")
+    end
+
+    dirs =
+      for file <- Map.keys(project.file_edges),
+          dir <- file |> Path.dirname() |> ancestors(),
+          into: MapSet.new(),
+          do: dir
+
+    # A file goes with the directory named after it (`orders.ex` with `orders/`): a module and its children.
+    dir_of = fn file ->
+      named_dir = Path.rootname(file)
+      if named_dir in dirs, do: group_of.(Path.join(named_dir, "_")), else: group_of.(file)
     end
 
     rank = %{"compile" => 3, "export" => 2, "runtime" => 1}
@@ -180,4 +193,8 @@ defmodule XrefMermaid.Selection do
       edges: edges
     }
   end
+
+  # `lib/a/b` -> ["lib/a/b", "lib/a", "lib"]
+  defp ancestors("."), do: []
+  defp ancestors(dir), do: [dir | ancestors(Path.dirname(dir))]
 end

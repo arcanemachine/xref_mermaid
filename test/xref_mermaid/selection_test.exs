@@ -191,7 +191,9 @@ defmodule XrefMermaid.SelectionTest do
           {A, "lib/app.ex", [], []},
           {B, "lib/app/orders/a.ex", [], []},
           {C, "lib/app/orders/b.ex", [], []},
-          {D, "lib/app/rules/c.ex", [], []}
+          {D, "lib/app/rules/c.ex", [], []},
+          {E, "lib/app/orders.ex", [], []},
+          {F, "lib/other.ex", [], []}
         ],
         %{
           "lib/app.ex" => %{"lib/app/orders/a.ex" => "runtime"},
@@ -199,23 +201,30 @@ defmodule XrefMermaid.SelectionTest do
             "lib/app/rules/c.ex" => "runtime",
             "lib/app/orders/b.ex" => "compile"
           },
-          "lib/app/orders/b.ex" => %{"lib/app/rules/c.ex" => "compile"}
+          "lib/app/orders/b.ex" => %{"lib/app/rules/c.ex" => "compile"},
+          "lib/app/orders.ex" => %{"lib/app/rules/c.ex" => "runtime"},
+          "lib/other.ex" => %{"lib/app.ex" => "runtime"}
         }
       )
 
-    assert Selection.overview(project, 1) == %{
-             dirs: ["lib/"],
-             edges: []
-           }
+    assert Selection.overview(project, 1) == %{dirs: ["lib/"], edges: []}
 
-    assert Selection.overview(project, 5).dirs == ["lib/*", "lib/app/orders/*", "lib/app/rules/*"]
+    # A file goes with the directory named after it: `app.ex` with `app/`, `orders.ex` with `orders/`.
+    assert Selection.overview(project, 2) == %{
+             dirs: ["lib/*", "lib/app/"],
+             edges: [{"lib/*", "lib/app/", "runtime", 1}]
+           }
 
     assert Selection.overview(project, 3) == %{
-             dirs: ["lib/*", "lib/app/orders/", "lib/app/rules/"],
+             dirs: ["lib/*", "lib/app/*", "lib/app/orders/", "lib/app/rules/"],
              edges: [
-               {"lib/*", "lib/app/orders/", "runtime", 1},
-               {"lib/app/orders/", "lib/app/rules/", "compile", 2}
+               {"lib/*", "lib/app/*", "runtime", 1},
+               {"lib/app/*", "lib/app/orders/", "runtime", 1},
+               {"lib/app/orders/", "lib/app/rules/", "compile", 3}
              ]
            }
+
+    assert Selection.overview(project, 5).dirs ==
+             ["lib/*", "lib/app/*", "lib/app/orders/*", "lib/app/rules/*"]
   end
 end
