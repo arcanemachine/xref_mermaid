@@ -7,6 +7,8 @@ defmodule XrefMermaid.Mermaid do
   (`lib/a/b.ex` and `lib/a_b.ex`) gets a `_2`, `_3`... suffix.
   """
 
+  alias XrefMermaid.Project
+
   # A labeled file dependency is written `a <open> kind <close> b`.
   @file_arrows %{
     "compile" => {"==", "==>"},
@@ -29,6 +31,9 @@ defmodule XrefMermaid.Mermaid do
       labeled with its main module, and its calls to another file are one arrow labeled with their count
 
   A file holding a start function (`from`/`to`) is never collapsed.
+
+  Two kinds of call arrow are marked: a call on a cycle of calls between files, over the whole project (red), and a
+  call to a parent module, by each file's main module (`MyApp.Orders.Line` to `MyApp.Orders` or `MyApp`; thick).
   """
   def write(project, selection, opts \\ []) do
     ## Ids
@@ -132,9 +137,73 @@ defmodule XrefMermaid.Mermaid do
       if(opts[:link],
         do: Enum.map(functions, &link_line(&1, ids, project, opts[:link])),
         else: ""
-      )
+      ),
+      mark_lines(project, selection, opts)
     ])
   end
+
+  @cycle_style "stroke:#d62728"
+  @parent_style "stroke-width:4px"
+
+  # `linkStyle` lines for the marked call arrows, which Mermaid finds by their place among all the arrows: the calls
+  # come first, then the file dependencies, then the legend's. Mermaid keeps only the last `linkStyle` naming an
+  # arrow, so an arrow with both marks gets one line with both styles.
+  defp mark_lines(project, selection, opts) do
+    groups = Project.cycle_groups(project)
+    file_of = fn key -> project.functions[key].file end
+
+    ends =
+      Enum.map(selection.calls, fn
+        {_, {:external, _}} -> nil
+        {caller, callee} -> {file_of.(caller), file_of.(callee)}
+      end) ++
+        Enum.map(selection.file_calls, fn
+          {{:file, source}, {:file, sink}, _} -> {source, sink}
+          _ -> nil
+        end)
+
+    styles =
+      for {{source, sink}, index} <- Enum.with_index(ends),
+          style = style(project, groups, source, sink),
+          style != "",
+          do: {index, style}
+
+    # The legend's two last arrows show the marks.
+    styles =
+      if opts[:legend] do
+        legend_start = length(ends) + length(selection.file_edges)
+        styles ++ [{legend_start + 2, @parent_style}, {legend_start + 3, @cycle_style}]
+      else
+        styles
+      end
+
+    styles
+    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+    |> Enum.sort()
+    |> Enum.map(fn {style, indexes} -> "  linkStyle #{Enum.join(indexes, ",")} #{style}\n" end)
+  end
+
+  # The style of a call arrow from `source` to `sink`, or "" when it isn't marked.
+  defp style(project, groups, source, sink) do
+    cycle? = source != sink and groups[source] != nil and groups[source] == groups[sink]
+    parent? = parent?(main_module(project, sink), main_module(project, source))
+
+    [if(cycle?, do: @cycle_style), if(parent?, do: @parent_style)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(",")
+  end
+
+  defp main_module(project, file), do: project.modules_in |> Map.get(file, []) |> List.first()
+
+  # `MyApp.Orders` is a parent of `MyApp.Orders.Line`, and so is `MyApp`.
+  defp parent?(parent, child)
+       when is_atom(parent) and is_atom(child) and not is_nil(parent) and not is_nil(child) do
+    parent_parts = Module.split(parent)
+    child_parts = Module.split(child)
+    length(parent_parts) < length(child_parts) and List.starts_with?(child_parts, parent_parts)
+  end
+
+  defp parent?(_, _), do: false
 
   @doc """
   Returns warnings for a chart over Mermaid 12's default limits (`maxTextSize`, `maxEdges`), which make it refuse to
@@ -372,6 +441,8 @@ defmodule XrefMermaid.Mermaid do
         legend_slice["file of the slice"]:::slice
         legend_caller["caller"] --> legend_called["called"]
         legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+        legend_child["caller"] --> legend_parent["its parent module"]
+        legend_cycle["caller"] --> legend_cycle_called["called, on a cycle of calls between files"]
       end
     """
   end
@@ -384,6 +455,8 @@ defmodule XrefMermaid.Mermaid do
         legend_slice["file of the slice"]:::slice
         legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
         legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+        legend_child["calling file"] --> legend_parent["its parent module"]
+        legend_cycle["calling file"] --> legend_cycle_called["called file, on a cycle of calls between files"]
       end
     """
   end

@@ -93,8 +93,11 @@ without `git`).
   module named after the file, or else the first one defined; functions of the others are labeled with their module
   (`Line.describe/1`), and functions of a protocol implementation with the protocol and type
   (`[impl Inspect for Line] inspect/2`, or `[impl String.Chars] to_string/1` for the main module's own).
-- `-->` is a call. A file dependency with no call behind it (a struct, a compile-time use) is a labeled arrow
-  between the files: `== compile ==>`, `-. export .->` or `-. runtime .->`.
+- `-->` is a call. A red one is on a cycle of calls between files (over the whole project, not only the part
+  drawn), and a thick one goes to a parent module (`MyApp.Orders.Line` to `MyApp.Orders` or `MyApp`, by each file's
+  main module): the calls worth a second look. With `--modules`, the same marks are on the arrows between files.
+- A file dependency with no call behind it (a struct, a compile-time use) is a labeled arrow between the files:
+  `== compile ==>`, `-. export .->` or `-. runtime .->`.
 - A collapsed file is a `<id>@{ view: collapsed }` line after its subgraph's `end` (Mermaid 12.2 supports it, though
   its docs don't mention it yet); delete the line to open it, add one to close it.
 

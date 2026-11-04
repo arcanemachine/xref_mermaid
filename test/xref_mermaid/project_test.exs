@@ -107,6 +107,21 @@ defmodule XrefMermaid.ProjectTest do
     assert {:error, _} = Project.resolve(project, {Shop.Repo, :insert, 1})
   end
 
+  test "cycle_groups/1 groups the files on a cycle of calls between files" do
+    project =
+      TestProject.build([
+        {A, "lib/a.ex", [{:run, [0], :def, 2}, {:back, [0], :def, 3}],
+         [{{:run, 0}, {B, :run, 0}}, {{:run, 0}, {A, :back, 0}}]},
+        {B, "lib/b.ex", [{:run, [0], :def, 2}], [{{:run, 0}, {C, :run, 0}}]},
+        {C, "lib/c.ex", [{:run, [0], :def, 2}], [{{:run, 0}, {A, :back, 0}}]},
+        {D, "lib/d.ex", [{:run, [0], :def, 2}], [{{:run, 0}, {A, :run, 0}}]}
+      ])
+
+    groups = Project.cycle_groups(project)
+    assert Map.keys(groups) == ["lib/a.ex", "lib/b.ex", "lib/c.ex"]
+    assert groups |> Map.values() |> Enum.uniq() |> length() == 1
+  end
+
   test "load_warnings/3 counts modules without debug info and modules whose files xref doesn't list" do
     project = TestProject.build([{A, "lib/a.ex", [], []}])
 

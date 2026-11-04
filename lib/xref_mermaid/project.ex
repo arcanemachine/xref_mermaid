@@ -150,6 +150,35 @@ defmodule XrefMermaid.Project do
   end
 
   @doc """
+  Groups the files that call each other in a cycle: returns `%{file => group}` for each file on a cycle of calls
+  between files, over the whole project. Two files are on one cycle when they share a group.
+  """
+  def cycle_groups(project) do
+    graph = :digraph.new()
+
+    try do
+      for {caller, callees} <- project.forward,
+          callee <- callees,
+          not match?({:external, _}, callee),
+          source = project.functions[caller].file,
+          sink = project.functions[callee].file,
+          source != sink do
+        :digraph.add_vertex(graph, source)
+        :digraph.add_vertex(graph, sink)
+        :digraph.add_edge(graph, source, sink)
+      end
+
+      for {files, group} <- Enum.with_index(:digraph_utils.strong_components(graph)),
+          length(files) > 1,
+          file <- files,
+          into: %{},
+          do: {file, group}
+    after
+      :digraph.delete(graph)
+    end
+  end
+
+  @doc """
   Drops the files whose paths start with one of `prefixes`: their file dependencies both ways, their modules and
   functions, and every call to or from them.
   """

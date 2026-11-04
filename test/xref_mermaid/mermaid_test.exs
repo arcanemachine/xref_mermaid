@@ -351,6 +351,8 @@ defmodule XrefMermaid.MermaidTest do
                legend_slice["file of the slice"]:::slice
                legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
                legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+               legend_child["calling file"] --> legend_parent["its parent module"]
+               legend_cycle["calling file"] --> legend_cycle_called["called file, on a cycle of calls between files"]
              end
              class f_orders slice
              classDef slice fill:#ffe9a8,stroke:#b8860b
@@ -358,6 +360,8 @@ defmodule XrefMermaid.MermaidTest do
              classDef private stroke-dasharray:4 3
              classDef generated fill:#eeeeee,stroke:#999999,color:#555555
              classDef start stroke:#cc3333,stroke-width:3px
+             linkStyle 6 stroke-width:4px
+             linkStyle 1,2,7 stroke:#d62728
            """
 
     assert XrefMermaid.Edges.write(project, selection) == """
@@ -365,6 +369,46 @@ defmodule XrefMermaid.MermaidTest do
            Shop.Orders -> Shop.Repo 2
            Shop.Repo -> Shop.Orders 1
            """
+  end
+
+  test "write/3 marks calls on a cycle between files and calls to a parent module" do
+    project =
+      TestProject.build([
+        {Shop, "lib/shop.ex", [{:config, [0], :def, 2}], []},
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 2}, {:check, [1], :def, 4}],
+         [
+           {{:place, 1}, {Shop.Orders.Line, :build, 1}},
+           {{:place, 1}, {Shop.Orders, :check, 1}},
+           {{:place, 1}, {Enum, :map, 2}}
+         ]},
+        {Shop.Orders.Line, "lib/shop/orders/line.ex", [{:build, [1], :def, 2}],
+         [{{:build, 1}, {Shop.Orders, :check, 1}}, {{:build, 1}, {Shop, :config, 0}}]}
+      ])
+
+    text =
+      Mermaid.write(
+        project,
+        Selection.select(project, prefixes: ["lib/shop/orders/line.ex"], external: true)
+      )
+
+    # Arrows, in order: build -> config (parent), build -> check (parent, and on the cycle orders <-> line).
+    assert text =~
+             "  f_shop_orders_line__build_1 --> f_shop__config_0\n" <>
+               "  f_shop_orders_line__build_1 --> f_shop_orders__check_1\n"
+
+    assert text =~
+             "  linkStyle 0 stroke-width:4px\n  linkStyle 1 stroke:#d62728,stroke-width:4px\n"
+
+    # Within one file, no mark; an external call, no mark.
+    text =
+      Mermaid.write(
+        project,
+        Selection.select(project, prefixes: ["lib/shop/orders.ex"], external: true)
+      )
+
+    # Arrows, in order: to Enum.map (external), to check (same file), to Line.build (on the cycle).
+    assert text =~ ~r/linkStyle 2 stroke:#d62728\n$/
+    refute text =~ "stroke-width:4px"
   end
 
   test "write_overview/1 draws one node per directory and labeled arrows" do
