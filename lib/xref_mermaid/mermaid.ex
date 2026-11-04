@@ -25,6 +25,8 @@ defmodule XrefMermaid.Mermaid do
     * `:legend` - adds a legend subgraph
     * `:details` - adds each function's first `@spec` and the start of its `@doc` to its label
     * `:call_order` - numbers each function's calls in the order its code makes them
+    * `:modules` - the selection is one between files (`XrefMermaid.Selection.by_file/2`): each file is a node
+      labeled with its main module, and its calls to another file are one arrow labeled with their count
 
   A file holding a start function (`from`/`to`) is never collapsed.
   """
@@ -100,11 +102,18 @@ defmodule XrefMermaid.Mermaid do
           number -> "  #{ids[caller]} -->|#{number}| #{ids[callee]}\n"
         end
       end),
+      Enum.map(selection.file_calls, fn {source, sink, count} ->
+        "  #{ids[source]} -->|#{count}| #{ids[sink]}\n"
+      end),
       Enum.map(selection.file_edges, fn {source, sink, kind} ->
         {open, close} = @file_arrows[kind]
         "  #{ids[{:file, source}]} #{open} #{kind} #{close} #{ids[{:file, sink}]}\n"
       end),
-      if(opts[:legend], do: legend(), else: ""),
+      cond do
+        !opts[:legend] -> ""
+        opts[:modules] -> module_legend()
+        true -> legend()
+      end,
       case Enum.filter(files, &(&1 in selection.slice_files)) do
         [] -> ""
         slice_files -> "  class #{Enum.map_join(slice_files, ",", &ids[{:file, &1}])} slice\n"
@@ -113,6 +122,10 @@ defmodule XrefMermaid.Mermaid do
       class_line(functions, &(&1.kind in [:defp, :defmacrop]), "private", ids),
       class_line(functions, & &1.generated?, "generated", ids),
       class_line(functions, &(&1.key in selection.starts), "start", ids),
+      case Enum.filter(files, &(&1 in selection.start_files)) do
+        [] -> ""
+        start_files -> "  class #{Enum.map_join(start_files, ",", &ids[{:file, &1}])} start\n"
+      end,
       "  classDef private stroke-dasharray:4 3\n",
       "  classDef generated fill:#eeeeee,stroke:#999999,color:#555555\n",
       "  classDef start stroke:#cc3333,stroke-width:3px\n",
@@ -195,7 +208,13 @@ defmodule XrefMermaid.Mermaid do
 
     # A file without shown functions stays a plain node: Mermaid can't draw an empty subgraph.
     if keys == [] do
-      ~s(#{pad}#{file_id}["#{escape(Path.basename(file))}"]\n)
+      label =
+        case {opts[:modules], context.project.modules_in[file]} do
+          {true, [main | _]} -> inspect(main)
+          _ -> Path.basename(file)
+        end
+
+      ~s(#{pad}#{file_id}["#{escape(label)}"]\n)
     else
       [
         ~s(#{pad}subgraph #{file_id} ["#{escape(Path.basename(file))}"]\n),
@@ -245,15 +264,19 @@ defmodule XrefMermaid.Mermaid do
   defp render_externals(externals, ids) do
     [
       ~s(  subgraph x_ ["external"]\n),
-      Enum.map(externals, fn {module, keys} ->
-        [
-          ~s(    subgraph #{ids[{:external_module, module}]} ["#{escape(inspect(module))}"]\n),
-          for(
-            {:external, {_, name, arity}} = key <- keys,
-            do: ~s(      #{ids[key]}["#{escape("#{name}/#{arity}")}"]\n)
-          ),
-          "    end\n"
-        ]
+      Enum.map(externals, fn
+        {module, []} ->
+          ~s(    #{ids[{:external_module, module}]}["#{escape(inspect(module))}"]\n)
+
+        {module, keys} ->
+          [
+            ~s(    subgraph #{ids[{:external_module, module}]} ["#{escape(inspect(module))}"]\n),
+            for(
+              {:external, {_, name, arity}} = key <- keys,
+              do: ~s(      #{ids[key]}["#{escape("#{name}/#{arity}")}"]\n)
+            ),
+            "    end\n"
+          ]
       end),
       "  end\n"
     ]
@@ -348,6 +371,18 @@ defmodule XrefMermaid.Mermaid do
         legend_start["start function"]:::start
         legend_slice["file of the slice"]:::slice
         legend_caller["caller"] --> legend_called["called"]
+        legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+      end
+    """
+  end
+
+  defp module_legend do
+    """
+      subgraph legend_ ["Legend"]
+        legend_module["file, by its main module"]
+        legend_start["file of a start function"]:::start
+        legend_slice["file of the slice"]:::slice
+        legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
         legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
       end
     """

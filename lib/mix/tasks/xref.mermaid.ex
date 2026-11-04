@@ -26,6 +26,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
     * `--exclude PREFIX` - leaves out the files whose paths start with it, and every call to or from them, in
       every mode (repeatable)
+    * `--modules` - one node per file instead of its functions, labeled with its main module, and one arrow per
+      pair of files, labeled with the number of distinct function-to-function calls between them
     * `--overview` - instead of all the above; takes only `--level` (default 2) and `--exclude`: one node per
       directory `--level` deep, arrows between them
 
@@ -80,7 +82,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
           details: :boolean,
           call_order: :boolean,
           exclude: :keep,
-          format: :string
+          format: :string,
+          modules: :boolean
         ],
         aliases: [o: :output]
       )
@@ -150,6 +153,19 @@ defmodule Mix.Tasks.Xref.Mermaid do
         Mix.raise(
           "--format edges takes no drawing options (--all-functions, --expanded, --collapsed, --link, --legend, " <>
             "--details, --call-order)"
+        )
+
+      opts[:modules] && opts[:overview] ->
+        Mix.raise("--modules doesn't go with --overview")
+
+      opts[:modules] &&
+          Enum.any?(
+            [:all_functions, :expanded, :collapsed, :link, :details, :call_order],
+            &Keyword.has_key?(opts, &1)
+          ) ->
+        Mix.raise(
+          "--modules draws no functions; leave out --all-functions, --expanded, --collapsed, --link, --details " <>
+            "and --call-order"
         )
 
       opts[:expanded] && opts[:collapsed] ->
@@ -233,9 +249,10 @@ defmodule Mix.Tasks.Xref.Mermaid do
       ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
 
     selection = Selection.select(project, selection_opts)
+    selection = if opts[:modules], do: Selection.by_file(project, selection), else: selection
 
     if opts[:format] == "edges",
-      do: Edges.write(selection),
+      do: Edges.write(project, selection),
       else: Mermaid.write(project, selection, opts)
   end
 

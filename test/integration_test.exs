@@ -168,6 +168,19 @@ defmodule XrefMermaid.IntegrationTest do
              "--format edges takes no drawing options"
   end
 
+  test "draws one node per file with --modules, in a chart or as plain text", context do
+    {text, _log} = chart(["lib/sample/orders.ex", "--modules"], context)
+    assert text =~ ~s(f_orders["Sample.Orders"])
+    assert text =~ "f_orders -->|1| f_repo"
+    refute text =~ "place"
+
+    {text, _log} = chart(["lib/sample/orders.ex", "--modules", "--format", "edges"], context)
+    assert text =~ "Sample.Orders -> Sample.Repo 1\n"
+
+    assert failure(["--overview", "--modules"], context) =~ "--modules doesn't go with --overview"
+    assert failure(["lib/", "--modules", "--details"], context) =~ "--modules draws no functions"
+  end
+
   test "stops with a message on what it can't draw", context do
     assert failure(["--from", "Sample.Orders.plcae/2"], context) =~
              ~r/No function Sample.Orders.plcae\/2 in the project. Closest: .*Sample.Orders.place\/1/

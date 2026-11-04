@@ -300,6 +300,73 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~ ~s(f_ops___lt_pipe_gt_2["#lt;|#gt;/2"])
   end
 
+  test "write/3 with `modules` draws one node per file and counted arrows between them" do
+    project =
+      TestProject.build(
+        [
+          {Shop.Orders, "lib/shop/orders.ex",
+           [{:place, [1, 2], :def, 2}, {:valid?, [1], :defp, 5}],
+           [
+             {{:place, 1}, {Shop.Orders, :valid?, 1}},
+             {{:place, 1}, {Shop.Repo, :insert, 1}},
+             {{:valid?, 1}, {Shop.Repo, :get, 1}},
+             {{:place, 1}, {Enum, :map, 2}}
+           ]},
+          {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}, {:get, [1], :def, 4}],
+           [{{:get, 1}, {Shop.Orders, :place, 1}}]},
+          {Shop.Order, "lib/shop/order.ex", [], []}
+        ],
+        %{"lib/shop/orders.ex" => %{"lib/shop/order.ex" => "export"}}
+      )
+
+    selection =
+      Selection.by_file(
+        project,
+        Selection.select(project,
+          prefixes: ["lib/shop/orders.ex"],
+          from: [{Shop.Orders, :place, 1}],
+          external: true
+        )
+      )
+
+    assert Mermaid.write(project, selection, modules: true, legend: true) == ~S"""
+           flowchart LR
+             subgraph d_lib ["lib/"]
+               subgraph d_lib_shop ["shop/"]
+                 f_order["Shop.Order"]
+                 f_orders["Shop.Orders"]
+                 f_repo["Shop.Repo"]
+               end
+             end
+             subgraph x_ ["external"]
+               x_Enum["Enum"]
+             end
+             f_orders -->|1| x_Enum
+             f_orders -->|2| f_repo
+             f_repo -->|1| f_orders
+             f_orders -. export .-> f_order
+             subgraph legend_ ["Legend"]
+               legend_module["file, by its main module"]
+               legend_start["file of a start function"]:::start
+               legend_slice["file of the slice"]:::slice
+               legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
+               legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+             end
+             class f_orders slice
+             classDef slice fill:#ffe9a8,stroke:#b8860b
+             class f_orders start
+             classDef private stroke-dasharray:4 3
+             classDef generated fill:#eeeeee,stroke:#999999,color:#555555
+             classDef start stroke:#cc3333,stroke-width:3px
+           """
+
+    assert XrefMermaid.Edges.write(project, selection) == """
+           Shop.Orders -> Enum 1
+           Shop.Orders -> Shop.Repo 2
+           Shop.Repo -> Shop.Orders 1
+           """
+  end
+
   test "write_overview/1 draws one node per directory and labeled arrows" do
     overview = %{
       dirs: ["lib/*", "lib/app/orders/"],

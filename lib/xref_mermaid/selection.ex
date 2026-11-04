@@ -17,7 +17,8 @@ defmodule XrefMermaid.Selection do
 
   @doc """
   Returns `%{files: %{file => [key]}, slice_files: MapSet, calls: [{caller, callee}], file_edges: [{source, sink,
-  kind}], starts: MapSet, externals: %{module => [key]}}`.
+  kind}], starts: MapSet, externals: %{module => [key]}, file_calls: [], start_files: MapSet}`; `file_calls` and
+  `start_files` are filled by `by_file/2`.
 
   Options: `prefixes`, `from`, `to`, `depth` (default 3), `incoming` (also the calls into the slice files and the
   file dependencies on them), `all_functions`, `external` (also calls to Elixir modules outside the project, as
@@ -112,7 +113,9 @@ defmodule XrefMermaid.Selection do
       calls: calls,
       file_edges: Enum.sort(file_edges),
       starts: MapSet.new(starts),
-      externals: externals
+      externals: externals,
+      file_calls: [],
+      start_files: MapSet.new()
     }
   end
 
@@ -145,6 +148,36 @@ defmodule XrefMermaid.Selection do
     if direction == :forward,
       do: taken,
       else: Enum.map(taken, fn {callee, caller} -> {caller, callee} end)
+  end
+
+  @doc """
+  Turns a selection (from `select/2`) into one between files, for a chart of one node per file: its calls become
+  `file_calls`, `[{source, sink, count}]`, where `source` and `sink` are `{:file, file}` or `{:external_module,
+  module}` and `count` is the number of distinct function-to-function calls between them; calls within a file drop
+  out. Its files and external modules list no functions, and `start_files` holds the files of the start functions.
+  """
+  def by_file(project, selection) do
+    end_of = fn
+      {:external, {module, _, _}} -> {:external_module, module}
+      key -> {:file, project.functions[key].file}
+    end
+
+    file_calls =
+      selection.calls
+      |> Enum.map(fn {caller, callee} -> {end_of.(caller), end_of.(callee)} end)
+      |> Enum.reject(fn {source, sink} -> source == sink end)
+      |> Enum.frequencies()
+      |> Enum.map(fn {{source, sink}, count} -> {source, sink, count} end)
+      |> Enum.sort()
+
+    %{
+      selection
+      | files: Map.new(selection.files, fn {file, _} -> {file, []} end),
+        externals: Map.new(selection.externals, fn {module, _} -> {module, []} end),
+        calls: [],
+        file_calls: file_calls,
+        start_files: MapSet.new(selection.starts, &project.functions[&1].file)
+    }
   end
 
   @doc """

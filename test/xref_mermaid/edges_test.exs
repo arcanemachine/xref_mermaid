@@ -9,10 +9,11 @@ defmodule XrefMermaid.EdgesTest do
         {{Shop.Orders, :place, 1}, {Shop.Repo, :insert, 1}},
         {{Shop.Orders, :place, 1}, {:external, {Enum, :map, 2}}},
         {{Shop.Orders, :valid?, 1}, {Shop.Orders, :<~>, 2}}
-      ]
+      ],
+      file_calls: []
     }
 
-    assert Edges.write(selection) == """
+    assert Edges.write(%{}, selection) == """
            Shop.Orders.place/1 -> Enum.map/2
            Shop.Orders.place/1 -> Shop.Repo.insert/1
            Shop.Orders.valid?/1 -> Shop.Orders.<~>/2
@@ -20,6 +21,6 @@ defmodule XrefMermaid.EdgesTest do
   end
 
   test "write/1 writes nothing for no calls" do
-    assert Edges.write(%{calls: []}) == ""
+    assert Edges.write(%{}, %{calls: [], file_calls: []}) == ""
   end
 end

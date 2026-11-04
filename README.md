@@ -53,6 +53,12 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
   `--incoming`, `--exclude`, `--external`), and none of the drawing options below or `--overview`. The default is
   `--format mermaid`.
+- `--modules`: one node per file instead of its functions, labeled with its main module, and one arrow per pair of
+  files, labeled with the number of distinct function-to-function calls between them (calls within a file drop out).
+  It draws what the selection reaches, so a slice of a few dozen files stays readable where its function chart is
+  too big. With `--external`, one node per external module. It takes none of `--all-functions`, `--expanded`,
+  `--collapsed`, `--link`, `--details` and `--call-order`. With `--format edges`, one line per pair:
+  `MyApp.Orders -> MyApp.Repo 3`.
 - `--all-functions`: every non-generated function of every shown file, not only the ones calls reach. With path
   prefixes, the files outside the slice then start collapsed.
 - `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules,

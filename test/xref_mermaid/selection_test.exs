@@ -172,6 +172,48 @@ defmodule XrefMermaid.SelectionTest do
     refute Enum.any?(selection.calls, &match?({_, {:external, {:erlang, _, _}}}, &1))
   end
 
+  test "by_file/2 counts the distinct calls between files, and drops the calls within one" do
+    project =
+      TestProject.build(
+        [
+          {Shop.Orders, "lib/shop/orders.ex",
+           [{:place, [1, 2], :def, 2}, {:valid?, [1], :defp, 5}],
+           [
+             {{:place, 1}, {Shop.Orders, :valid?, 1}},
+             {{:place, 1}, {Shop.Repo, :insert, 1}},
+             {{:valid?, 1}, {Shop.Repo, :get, 1}},
+             {{:place, 1}, {Enum, :map, 2}}
+           ]},
+          {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}, {:get, [1], :def, 4}],
+           [{{:get, 1}, {Shop.Orders, :place, 1}}]},
+          {Shop.Order, "lib/shop/order.ex", [], []}
+        ],
+        %{"lib/shop/orders.ex" => %{"lib/shop/order.ex" => "export"}}
+      )
+
+    selection =
+      Selection.by_file(
+        project,
+        Selection.select(project,
+          prefixes: ["lib/shop/orders.ex"],
+          from: [{Shop.Orders, :place, 1}],
+          external: true
+        )
+      )
+
+    assert selection.file_calls == [
+             {{:file, "lib/shop/orders.ex"}, {:external_module, Enum}, 1},
+             {{:file, "lib/shop/orders.ex"}, {:file, "lib/shop/repo.ex"}, 2},
+             {{:file, "lib/shop/repo.ex"}, {:file, "lib/shop/orders.ex"}, 1}
+           ]
+
+    assert selection.calls == []
+    assert selection.externals == %{Enum => []}
+    assert Enum.all?(Map.values(selection.files), &(&1 == []))
+    assert selection.start_files == MapSet.new(["lib/shop/orders.ex"])
+    assert selection.file_edges == [{"lib/shop/orders.ex", "lib/shop/order.ex", "export"}]
+  end
+
   test "overview/2 groups files at the root as `./*`" do
     project =
       TestProject.build([{A, "a.ex", [], []}, {B, "lib/b.ex", [], []}], %{
