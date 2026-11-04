@@ -231,10 +231,25 @@ defmodule XrefMermaid.IntegrationTest do
     refute log =~ "warning:"
   end
 
-  test "stops at an umbrella root", %{env: env} do
+  test "reads every app at an umbrella root, so calls between apps show", %{
+    env: env,
+    tmp_dir: tmp_dir
+  } do
     umbrella = Path.join(@root, "test/fixtures/umbrella")
-    {log, status} = mix(["xref.mermaid", "--overview", "-o", "x.mmd"], umbrella, env)
-    assert status != 0
-    assert log =~ "not from the umbrella root"
+    output = Path.join(tmp_dir, "umbrella.txt")
+
+    {log, 0} =
+      mix(
+        ["xref.mermaid", "--to", "Core.hello/0", "--format", "edges", "-o", output],
+        umbrella,
+        env
+      )
+
+    refute log =~ "warning:"
+    assert File.read!(output) == "Web.page/0 -> Core.hello/0\n"
+
+    output = Path.join(tmp_dir, "umbrella.mmd")
+    {_, 0} = mix(["xref.mermaid", "apps/web/lib/", "-o", output], umbrella, env)
+    assert File.read!(output) =~ ~s(subgraph f_web_lib_web ["web.ex"])
   end
 end

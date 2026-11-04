@@ -10,7 +10,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       mix xref.mermaid --to MyApp.Repo.insert -o who_inserts.mmd
       mix xref.mermaid --overview --level 3 -o overview.mmd
 
-  Run it from an app's directory (in an umbrella project, not from the umbrella root).
+  In an umbrella project, run it from the umbrella root to read every app (paths start with `apps/<app>/`), or from
+  an app's directory to read only that app.
 
   ## What to draw
 
@@ -121,14 +122,16 @@ defmodule Mix.Tasks.Xref.Mermaid do
     Mix.shell().info("Wrote #{output}")
   end
 
-  # An umbrella's apps share its lockfile. Only this app is read, so callers in the other apps are missing.
+  # An umbrella's apps share its lockfile. Run in an app, only that app is read, so callers in the other apps are
+  # missing.
   defp umbrella_warnings(project, opts) do
     in_umbrella? =
       Path.dirname(Path.expand(Mix.Project.config()[:lockfile], project.root)) != project.root
 
     if in_umbrella? and (opts[:incoming] || Keyword.has_key?(opts, :to)) do
       [
-        "this app is part of an umbrella; calls from its other apps aren't read, so their callers are missing"
+        "this app is part of an umbrella; calls from its other apps aren't read, so their callers are missing " <>
+          "(run from the umbrella root to read them)"
       ]
     else
       []

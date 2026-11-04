@@ -14,7 +14,8 @@ mix archive.install hex xref_mermaid                    # once it's published on
 
 ## Usage
 
-From the project to draw (in an umbrella project, from the app's directory):
+From the project to draw. In an umbrella project, from the umbrella root to read every app (paths then start with
+`apps/<app>/`), or from an app's directory to read only that app:
 
 ```bash
 mix xref.mermaid lib/my_app/orders.ex lib/my_app/orders/ -o orders.mmd   # these files
@@ -115,9 +116,11 @@ What it can't see:
 - Calls through a variable (`apply/3`, `module.fun()`, a behaviour's or protocol's implementation called through the
   behaviour or protocol): the call stops at what the code names.
 - `super(...)` calls in an overridden function.
-- In an umbrella project, the other apps: only the current app is read, so callers in the other apps are missing
-  (the task warns when `--incoming` or `--to` runs in an umbrella app), and the other apps' functions show only as
-  external, with `--external`.
+- In an umbrella project run from an app's directory, the other apps: only that app is read, so callers in the other
+  apps are missing (the task warns when `--incoming` or `--to` runs there), and the other apps' functions show only
+  as external, with `--external`. Run from the umbrella root, every app is read, and calls between apps show.
+- From the umbrella root, file dependencies between apps with no call behind them (a struct, a compile-time use):
+  `mix xref graph` lists each app's files on their own. So `--overview` there draws no arrows between apps.
 - Macros: they are expanded before compiling, so a macro never has callers; its use shows as a compile dependency
   between files, and the code it expands to counts as the caller's.
 

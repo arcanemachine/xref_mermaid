@@ -23,42 +23,68 @@ defmodule XrefMermaid.Project do
             backward: %{}
 
   @doc """
-  Compiles the current Mix project and reads its file graph (`mix xref graph`) and its compiled modules.
+  Compiles the current Mix project and reads its file graph (`mix xref graph`) and its compiled modules. At an
+  umbrella root, it reads every app, with paths relative to the root (`apps/my_app/lib/...`).
 
   With `details: true`, functions also get their docs and specs. Returns `{project, warnings}`.
   """
   def load(opts \\ []) do
     Mix.Project.get!()
-
-    if Mix.Project.umbrella?() do
-      Mix.raise("Run this task from an app's directory, not from the umbrella root")
-    end
-
     root = Path.dirname(Mix.Project.project_file())
 
-    dot_path =
-      Path.join(System.tmp_dir!(), "xref_mermaid_#{System.unique_integer([:positive])}.dot")
-
-    # The project compiles first, with its messages shown; xref then runs quietly, since `mix xref graph` would only
-    # print how to render the dot file.
+    # The project compiles first, with its messages shown.
     Mix.Task.run("compile")
-    shell = Mix.shell()
 
-    file_edges =
-      try do
-        Mix.shell(Mix.Shell.Quiet)
-        Mix.Task.rerun("xref", ["graph", "--format", "dot", "--output", dot_path])
-        dot_path |> File.read!() |> DotGraph.parse()
-      after
-        Mix.shell(shell)
-        File.rm(dot_path)
+    # An umbrella's apps are read one by one: `mix xref graph` at the root would list every app's files without
+    # their app's directory, so two apps' `lib/my_app.ex` would clash.
+    {file_edges, beams} =
+      if Mix.Project.umbrella?() do
+        Mix.Project.apps_paths()
+        |> Enum.sort()
+        |> Enum.map(fn {app, path} ->
+          Mix.Project.in_project(app, Path.join(root, path), fn _ ->
+            {prefix_paths(file_graph(), path), beam_paths()}
+          end)
+        end)
+        |> Enum.unzip()
+        |> then(fn {graphs, beams} ->
+          {Enum.reduce(graphs, %{}, &Map.merge/2), Enum.concat(beams)}
+        end)
+      else
+        {file_graph(), beam_paths()}
       end
 
-    # Erlang modules (from `src/`) are left out: they have no Elixir debug info to read.
-    beams = Path.wildcard(Path.join(Mix.Project.compile_path(), "Elixir.*.beam"))
     modules = beams |> Enum.map(&Beam.read(File.read!(&1), opts)) |> Enum.reject(&is_nil/1)
     project = new(file_edges, modules, root)
     {project, load_warnings(project, modules, length(beams))}
+  end
+
+  # The current project's file graph, from `mix xref graph`, run quietly: it would only print how to render the dot
+  # file.
+  defp file_graph do
+    dot_path =
+      Path.join(System.tmp_dir!(), "xref_mermaid_#{System.unique_integer([:positive])}.dot")
+
+    shell = Mix.shell()
+
+    try do
+      Mix.shell(Mix.Shell.Quiet)
+      Mix.Task.rerun("xref", ["graph", "--format", "dot", "--output", dot_path])
+      dot_path |> File.read!() |> DotGraph.parse()
+    after
+      Mix.shell(shell)
+      File.rm(dot_path)
+    end
+  end
+
+  # Erlang modules (from `src/`) are left out: they have no Elixir debug info to read.
+  defp beam_paths, do: Path.wildcard(Path.join(Mix.Project.compile_path(), "Elixir.*.beam"))
+
+  defp prefix_paths(file_edges, dir) do
+    Map.new(file_edges, fn {source, sinks} ->
+      {Path.join(dir, source),
+       Map.new(sinks, fn {sink, kind} -> {Path.join(dir, sink), kind} end)}
+    end)
   end
 
   @doc false
