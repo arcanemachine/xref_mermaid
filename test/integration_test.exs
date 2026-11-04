@@ -151,6 +151,23 @@ defmodule XrefMermaid.IntegrationTest do
              "Sample.Repo.save/1 is in a file left out by --exclude"
   end
 
+  test "writes the calls as plain text with --format edges", context do
+    {text, log} = chart(["--from", "Sample.Orders.place/2", "--format", "edges"], context)
+
+    assert text =~ "Sample.Orders.place/1 -> Sample.Repo.save/1\n"
+    refute text =~ "flowchart"
+    refute log =~ "warning:"
+
+    assert failure(["--from", "Sample.Orders.place", "--format", "dot"], context) =~
+             "--format is mermaid or edges"
+
+    assert failure(["--overview", "--format", "edges"], context) =~
+             "--format edges doesn't go with --overview"
+
+    assert failure(["lib/", "--format", "edges", "--legend"], context) =~
+             "--format edges takes no drawing options"
+  end
+
   test "stops with a message on what it can't draw", context do
     assert failure(["--from", "Sample.Orders.plcae/2"], context) =~
              ~r/No function Sample.Orders.plcae\/2 in the project. Closest: .*Sample.Orders.place\/1/

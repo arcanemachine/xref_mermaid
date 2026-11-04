@@ -48,6 +48,11 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 ### How to draw it
 
 - `-o`, `--output`: the file to write (required). Regenerating overwrites it.
+- `--format edges`: instead of a chart, plain text with one sorted line per call (`MyApp.Orders.place/1 ->
+  MyApp.Repo.insert/2`, each function named by its lowest arity), for comparing two runs, before and after a
+  refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
+  `--incoming`, `--exclude`, `--external`), and none of the drawing options below or `--overview`. The default is
+  `--format mermaid`.
 - `--all-functions`: every non-generated function of every shown file, not only the ones calls reach. With path
   prefixes, the files outside the slice then start collapsed.
 - `--external`: also calls to Elixir modules outside the project (Ecto, Enum...), as leaves. Erlang modules,

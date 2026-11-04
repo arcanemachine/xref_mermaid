@@ -32,6 +32,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
   ## How to draw it
 
     * `-o`, `--output` - the file to write (required)
+    * `--format FORMAT` - `mermaid` (the default) or `edges`: plain text, one sorted line per call
+      (`Mod.fun/arity -> Mod.fun/arity`), for diffing; it takes none of the options below but `--external`
     * `--all-functions` - every non-generated function of every shown file, not just the ones calls reach
       (with path prefixes, files outside the slice start collapsed)
     * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel`,
@@ -55,7 +57,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   use Mix.Task
 
-  alias XrefMermaid.{Mermaid, Project, Selection, VersionCheck}
+  alias XrefMermaid.{Edges, Mermaid, Project, Selection, VersionCheck}
 
   @impl true
   def run(argv) do
@@ -77,7 +79,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
           legend: :boolean,
           details: :boolean,
           call_order: :boolean,
-          exclude: :keep
+          exclude: :keep,
+          format: :string
         ],
         aliases: [o: :output]
       )
@@ -108,7 +111,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
       warnings ++
         exclude_warnings ++
         umbrella_warnings(project, opts) ++
-        Mermaid.limit_warnings(text) ++
+        if(opts[:format] == "edges", do: [], else: Mermaid.limit_warnings(text)) ++
         version_warnings
 
     Enum.each(warnings, &Mix.shell().error("warning: " <> &1))
@@ -133,6 +136,22 @@ defmodule Mix.Tasks.Xref.Mermaid do
     from_or_to? = Keyword.has_key?(opts, :from) or Keyword.has_key?(opts, :to)
 
     cond do
+      opts[:format] not in [nil, "mermaid", "edges"] ->
+        Mix.raise("--format is mermaid or edges")
+
+      opts[:format] == "edges" && opts[:overview] ->
+        Mix.raise("--format edges doesn't go with --overview")
+
+      opts[:format] == "edges" &&
+          Enum.any?(
+            [:all_functions, :expanded, :collapsed, :link, :legend, :details, :call_order],
+            &Keyword.has_key?(opts, &1)
+          ) ->
+        Mix.raise(
+          "--format edges takes no drawing options (--all-functions, --expanded, --collapsed, --link, --legend, " <>
+            "--details, --call-order)"
+        )
+
       opts[:expanded] && opts[:collapsed] ->
         Mix.raise("Give --expanded or --collapsed, not both")
 
@@ -213,7 +232,11 @@ defmodule Mix.Tasks.Xref.Mermaid do
         to: opts |> Keyword.get_values(:to) |> Enum.flat_map(resolve)
       ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
 
-    Mermaid.write(project, Selection.select(project, selection_opts), opts)
+    selection = Selection.select(project, selection_opts)
+
+    if opts[:format] == "edges",
+      do: Edges.write(selection),
+      else: Mermaid.write(project, selection, opts)
   end
 
   defp relative_prefix!(prefix, project) do
