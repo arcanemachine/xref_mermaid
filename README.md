@@ -76,6 +76,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   the name and with module names cut to their last part, and the first paragraph of its `@doc`, each cut to 80
   characters. Labels grow, so it reads best on a few files or a `--from` walk.
 - `--call-order`: numbers each function's calls (`-->|1|`) in the order its code first makes them.
+- `--direction DIR`: the chart's direction: `LR` (left to right, the default), `RL`, `TB` (top to bottom; `TD` is the
+  same) or `BT`. It applies to every chart, `--modules` and `--overview` included.
 
 ### What changed
 
@@ -140,6 +142,8 @@ without `git`).
   main module): the calls worth a second look. With `--modules`, the same marks are on the arrows between files.
 - A file dependency with no call behind it (a struct, a compile-time use) is a labeled arrow between the files:
   `== compile ==>`, `-. export .->` or `-. runtime .->`.
+- Node ids are internal: the same file or function can get a different id in another chart (they leave out the
+  directory every shown file shares, and a clash adds a `_2`). To compare runs, use `--format edges`.
 - A collapsed file is a `<id>@{ view: collapsed }` line after its subgraph's `end` (Mermaid 12.2 supports it, though
   its docs don't mention it yet); delete the line to open it, add one to close it.
 

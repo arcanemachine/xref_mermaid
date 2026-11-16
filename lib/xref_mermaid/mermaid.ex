@@ -27,6 +27,7 @@ defmodule XrefMermaid.Mermaid do
     * `:legend` - adds a legend subgraph
     * `:details` - adds each function's first `@spec` and the start of its `@doc` to its label
     * `:call_order` - numbers each function's calls in the order its code makes them
+    * `:direction` - the chart's direction (default `"LR"`)
     * `:modules` - the selection is one between files (`XrefMermaid.Selection.by_file/3`): each file is a node
       labeled with its main module, and its calls to another file are one arrow labeled with their count
 
@@ -119,7 +120,7 @@ defmodule XrefMermaid.Mermaid do
     removed = changes && changes.removed
 
     IO.iodata_to_binary([
-      "flowchart LR\n",
+      "flowchart #{Keyword.get(opts, :direction, "LR")}\n",
       if(removed, do: "  %% #{Changes.removed_count(removed)}\n", else: ""),
       # Files at the project root sit at the top level, outside any directory.
       Enum.map(Enum.sort(Map.get(context.files_in, ".", [])), &render_file(&1, "  ", context)),
@@ -369,12 +370,13 @@ defmodule XrefMermaid.Mermaid do
 
   @doc """
   Writes an overview (`XrefMermaid.Selection.overview/2`): one node per directory, one labeled arrow per pair.
+  Takes the `:direction` option of `write/3`.
   """
-  def write_overview(overview) do
+  def write_overview(overview, opts \\ []) do
     ids = unique_ids(Enum.map(overview.dirs, &{&1, "d_" <> clean(&1)}))
 
     IO.iodata_to_binary([
-      "flowchart LR\n",
+      "flowchart #{Keyword.get(opts, :direction, "LR")}\n",
       Enum.map(overview.dirs, &~s(  #{ids[&1]}["#{escape(&1)}"]\n)),
       Enum.map(overview.edges, fn {source, sink, kind, count} ->
         {open, close} = @file_arrows[kind]

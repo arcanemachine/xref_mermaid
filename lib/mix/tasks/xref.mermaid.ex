@@ -31,8 +31,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       every mode (repeatable)
     * `--modules` - one node per file instead of its functions, labeled with its main module, and one arrow per
       pair of files, labeled with the number of distinct function-to-function calls between them
-    * `--overview` - instead of all the above; takes only `--level` (default 2) and `--exclude`: one node per
-      directory `--level` deep, arrows between them
+    * `--overview` - instead of all the above; takes only `--level` (default 2), `--exclude` and `--direction`: one
+      node per directory `--level` deep, arrows between them
 
   ## How to draw it
 
@@ -51,6 +51,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--legend` - adds a legend
     * `--details` - adds each function's first `@spec` and the first paragraph of its `@doc`, cut short
     * `--call-order` - numbers each function's calls in the order its code makes them
+    * `--direction DIR` - the chart's direction: `LR` (the default), `RL`, `TB`, `TD` or `BT`
 
   Regenerating overwrites the output file.
 
@@ -99,7 +100,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
           snapshot: :boolean,
           since: :string,
           changes: :string,
-          marks: :string
+          marks: :string,
+          direction: :string
         ],
         aliases: [o: :output]
       )
@@ -182,17 +184,29 @@ defmodule Mix.Tasks.Xref.Mermaid do
       opts[:format] not in [nil, "mermaid", "edges"] ->
         Mix.raise("--format is mermaid or edges")
 
+      opts[:direction] not in [nil, "LR", "RL", "TB", "TD", "BT"] ->
+        Mix.raise("--direction is LR, RL, TB, TD or BT")
+
       opts[:format] == "edges" && opts[:overview] ->
         Mix.raise("--format edges doesn't go with --overview")
 
       opts[:format] == "edges" &&
           Enum.any?(
-            [:all_functions, :expanded, :collapsed, :link, :legend, :details, :call_order],
+            [
+              :all_functions,
+              :expanded,
+              :collapsed,
+              :link,
+              :legend,
+              :details,
+              :call_order,
+              :direction
+            ],
             &Keyword.has_key?(opts, &1)
           ) ->
         Mix.raise(
           "--format edges takes no drawing options (--all-functions, --expanded, --collapsed, --link, --legend, " <>
-            "--details, --call-order)"
+            "--details, --call-order, --direction)"
         )
 
       opts[:modules] && opts[:overview] ->
@@ -230,7 +244,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
             ],
             &Keyword.has_key?(opts, &1)
           ) ->
-        Mix.raise("--overview takes only --level, --exclude and --output")
+        Mix.raise("--overview takes only --level, --exclude, --direction and --output")
 
       !opts[:overview] and prefixes == [] and not from_or_to? ->
         Mix.raise("Give path prefixes, --from, --to or --overview")
@@ -259,7 +273,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
   end
 
   defp overview(project, opts) do
-    project |> Selection.overview(Keyword.get(opts, :level, 2)) |> Mermaid.write_overview()
+    project
+    |> Selection.overview(Keyword.get(opts, :level, 2))
+    |> Mermaid.write_overview(Keyword.take(opts, [:direction]))
   end
 
   # An exclusion that matches no file only warns: the same exclusions are often reused across runs.

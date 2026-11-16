@@ -133,6 +133,22 @@ defmodule XrefMermaid.IntegrationTest do
     assert text =~ "d_lib_sample__ -. runtime ×1 .-> d_lib_sample_a_"
   end
 
+  test "sets the chart's direction", context do
+    {text, _log} = chart(["--overview", "--direction", "TB"], context)
+    assert text =~ ~r/\Aflowchart TB\n/
+
+    {text, _log} = chart(["lib/sample/orders.ex", "--modules", "--direction", "RL"], context)
+    assert text =~ ~r/\Aflowchart RL\n/
+
+    assert failure(["lib/", "--direction", "tb"], context) =~
+             "--direction is LR, RL, TB, TD or BT"
+
+    assert failure(["lib/", "--format", "edges", "--direction", "TB"], context) =~
+             "--format edges takes no drawing options"
+
+    assert failure(["--snapshot", "--direction", "TB"], context) =~ "it takes only --output"
+  end
+
   test "leaves out excluded files, and warns on an exclusion that matches nothing", context do
     {text, log} =
       chart(

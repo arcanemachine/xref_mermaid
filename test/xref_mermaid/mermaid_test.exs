@@ -520,4 +520,15 @@ defmodule XrefMermaid.MermaidTest do
              d_lib__ == compile ×2 ==> d_lib_app_orders_
            """
   end
+
+  test "write/3 and write_overview/2 take the chart's direction", %{project: project} do
+    selection = Selection.select(project, prefixes: ["lib/shop/orders.ex"])
+    assert Mermaid.write(project, selection, direction: "TB") =~ ~r/\Aflowchart TB\n/
+
+    modules = Selection.by_file(project, selection)
+    assert Mermaid.write(project, modules, modules: true, direction: "BT") =~ ~r/\Aflowchart BT\n/
+
+    overview = %{dirs: ["lib/*"], edges: []}
+    assert Mermaid.write_overview(overview, direction: "TD") =~ ~r/\Aflowchart TD\n/
+  end
 end
