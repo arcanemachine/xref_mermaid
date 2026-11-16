@@ -578,10 +578,13 @@ defmodule XrefMermaid.Mermaid do
     ~s(  click #{ids[function.key]} href "#{url}"\n)
   end
 
+  # The legend reads left to right in every chart direction: in a top-to-bottom chart it sits beside the chart, and
+  # left to right it stays a narrow column. Its nodes link only to each other, so Mermaid keeps its direction.
   defp legend(extra) do
     [
       """
         subgraph legend_ ["Legend"]
+          direction LR
           legend_public["public function"]
           legend_private["private function"]:::private
           legend_generated["generated function"]:::generated
@@ -627,6 +630,7 @@ defmodule XrefMermaid.Mermaid do
     [
       """
         subgraph legend_ ["Legend"]
+          direction LR
           legend_module["file, by its main module"]
           legend_start["file of a start function"]:::start
           legend_slice["file of the slice"]:::slice

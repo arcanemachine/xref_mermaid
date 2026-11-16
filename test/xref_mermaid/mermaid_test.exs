@@ -93,7 +93,7 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~
              ~s(  click f_orders__place_1 href "editor://open?file=/project/lib/shop/orders.ex&line=2"\n)
 
-    assert text =~ ~s(  subgraph legend_ ["Legend"]\n)
+    assert text =~ ~s(  subgraph legend_ ["Legend"]\n    direction LR\n)
   end
 
   test "write/3 opens every file by default, and collapses the files outside the slice with `all_functions`",
@@ -346,6 +346,7 @@ defmodule XrefMermaid.MermaidTest do
              f_repo -->|1| f_orders
              f_orders -. export .-> f_order
              subgraph legend_ ["Legend"]
+               direction LR
                legend_module["file, by its main module"]
                legend_start["file of a start function"]:::start
                legend_slice["file of the slice"]:::slice
