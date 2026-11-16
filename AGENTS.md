@@ -27,6 +27,7 @@ file, and where the two differ, the local file wins.
 - The task runs as a Mix archive, loaded after Mix prunes the code path to compile the project. Keep the code free
   of anything compiled into the archive that breaks on another Elixir version (e.g. regex literals: compile them at
   run time).
+- Commit messages follow Conventional Commits (`feat: ...`, `fix(scope): ...`, `docs: ...`).
 - Supported Elixir versions: 1.15 and later. Run the tests on the oldest and newest you can before committing a
   code change.
 
