@@ -15,6 +15,8 @@ file, and where the two differ, the local file wins.
 - `lib/xref_mermaid/mermaid.ex`: writes a selection as Mermaid text (ids, labels, classes, collapse lines, links, the cycle
   and parent-module marks).
 - `lib/xref_mermaid/edges.ex`: writes a selection as plain text, one line per call (`--format edges`).
+- `lib/xref_mermaid/snapshot.ex`, `changes.ex` and `source.ex`: `--snapshot` writes the project as text; `--since`
+  compares the project with it (`changes.ex`), a function's change found by hashing its source (`source.ex`).
 - `lib/xref_mermaid/version_check.ex`: the opt-in check for a newer commit on GitHub (`XREF_MERMAID_VERSION_CHECK=1`);
   a development feature, kept in one module so it is easy to remove.
 

@@ -201,6 +201,98 @@ defmodule XrefMermaid.IntegrationTest do
 
     assert failure(["--from", "Sample.Orders.place", "--incoming"], context) =~
              "--incoming goes with path prefixes"
+
+    assert failure(["--snapshot", "lib/"], context) =~ "--snapshot writes the whole project"
+    assert failure(["--snapshot", "--exclude", "lib/"], context) =~ "it takes only --output"
+
+    assert failure(["lib/", "--since", "x", "--format", "edges"], context) =~
+             "--since goes with a chart"
+
+    assert failure(["lib/", "--changes", "x"], context) =~ "--changes goes with --since"
+    assert failure(["lib/", "--marks", "labels"], context) =~ "--marks goes with --since"
+
+    assert failure(["lib/", "--since", "x", "--marks", "red"], context) =~
+             "--marks is colors, labels or both"
+
+    assert failure(["lib/", "--since", "nope.snapshot"], context) =~ "Can't read nope.snapshot"
+  end
+
+  test "marks what changed since a snapshot of an earlier state", %{env: env, tmp_dir: tmp_dir} do
+    # A copy of the fixture, with a build of its own, to change.
+    app = Path.join(tmp_dir, "since_app")
+    File.cp_r!(@fixture, app)
+    env = [{"MIX_BUILD_PATH", Path.join(tmp_dir, "since_build")} | tl(env)]
+    snapshot = Path.join(tmp_dir, "before.snapshot")
+    {_, 0} = mix(["xref.mermaid", "--snapshot", "-o", snapshot], app, env)
+
+    # Changes: a comment shifts every line of orders.ex, `valid?/1` is edited, `summary/1` and `notes.ex` are added,
+    # and `lib/sample/a/b.ex` and the call to it in `paths/0` are removed.
+    orders = Path.join(app, "lib/sample/orders.ex")
+
+    text =
+      orders
+      |> File.read!()
+      |> String.replace("order.items != []", "order.items not in [nil, []]")
+      |> String.replace("{Sample.A.B.run(), Sample.AB.run()}", "Sample.AB.run()")
+      |> String.replace(
+        "  defp finish",
+        "  def summary(order), do: Sample.Orders.Notes.note(order)\n\n  defp finish"
+      )
+
+    File.write!(orders, "# Orders.\n\n" <> text)
+    File.rm!(Path.join(app, "lib/sample/a/b.ex"))
+
+    File.mkdir_p!(Path.join(app, "lib/sample/orders"))
+
+    File.write!(Path.join(app, "lib/sample/orders/notes.ex"), """
+    defmodule Sample.Orders.Notes do
+      def note(order), do: Sample.Orders.valid?(order)
+    end
+    """)
+
+    output = Path.join(tmp_dir, "since.mmd")
+    changes = Path.join(tmp_dir, "since.txt")
+
+    {log, 0} =
+      mix(
+        [
+          "xref.mermaid",
+          "lib/sample/orders",
+          "lib/sample/a/",
+          "--since",
+          snapshot,
+          "--changes",
+          changes
+        ] ++
+          ["-o", output],
+        app,
+        env
+      )
+
+    refute log =~ "warning:"
+
+    assert File.read!(changes) == """
+           + file lib/sample/orders/notes.ex
+           + function Sample.Orders.Notes.note/1
+           + function Sample.Orders.summary/1
+           ~ function Sample.Orders.paths/0
+           ~ function Sample.Orders.valid?/1
+           + call Sample.Orders.Notes.note/1 -> Sample.Orders.valid?/1
+           + call Sample.Orders.summary/1 -> Sample.Orders.Notes.note/1
+           - file lib/sample/a/b.ex
+           - function Sample.A.B.run/0
+           - call Sample.Orders.paths/0 -> Sample.A.B.run/0
+           removed: 1 file, 1 function, 1 call
+           """
+
+    chart = File.read!(output)
+    assert chart =~ "%% removed: 1 file, 1 function, 1 call"
+    assert chart =~ "class f_orders__summary_1,f_orders_notes added"
+    assert chart =~ "class f_orders__paths_0,f_orders__valid_q_1 changed"
+
+    # A slice that is gone draws nothing, but counts what was removed.
+    {_, 0} = mix(["xref.mermaid", "lib/sample/a/", "--since", snapshot, "-o", output], app, env)
+    assert File.read!(output) =~ "%% removed: 1 file, 1 function, 0 calls"
   end
 
   test "stops with a message outside a project and on an unwritable output", %{

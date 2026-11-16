@@ -9,6 +9,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd
       mix xref.mermaid --to MyApp.Repo.insert -o who_inserts.mmd
       mix xref.mermaid --overview --level 3 -o overview.mmd
+      mix xref.mermaid --snapshot -o before.snapshot
+      mix xref.mermaid lib/my_app/orders/ --since before.snapshot -o orders.mmd
 
   In an umbrella project, run it from the umbrella root to read every app (paths start with `apps/<app>/`), or from
   an app's directory to read only that app.
@@ -52,6 +54,15 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   Regenerating overwrites the output file.
 
+  ## What changed
+
+    * `--snapshot` - instead of a chart, writes the whole project as text to compare with later; takes only `-o`
+    * `--since SNAPSHOT` - marks what is added (green), changed (blue) and new calls (green arrows) since the
+      snapshot; not with `--overview` or `--format edges`
+    * `--changes FILE` - with `--since`, also writes the changes as text, one line each, and the removed counts
+    * `--marks MARKS` - with `--since`: `colors` (the default), `labels` (`+` and `~` before names, no colors) or
+      `both`
+
   ## Version check
 
   A development feature, which may be removed: with `XREF_MERMAID_VERSION_CHECK=1` set, the task warns when GitHub
@@ -60,7 +71,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
   use Mix.Task
 
-  alias XrefMermaid.{Edges, Mermaid, Project, Selection, VersionCheck}
+  alias XrefMermaid.{Changes, Edges, Mermaid, Project, Selection, Snapshot, Source, VersionCheck}
 
   @impl true
   def run(argv) do
@@ -84,7 +95,11 @@ defmodule Mix.Tasks.Xref.Mermaid do
           call_order: :boolean,
           exclude: :keep,
           format: :string,
-          modules: :boolean
+          modules: :boolean,
+          snapshot: :boolean,
+          since: :string,
+          changes: :string,
+          marks: :string
         ],
         aliases: [o: :output]
       )
@@ -102,20 +117,24 @@ defmodule Mix.Tasks.Xref.Mermaid do
     {excludes, exclude_warnings} = excludes(full_project, opts)
     project = Project.exclude(full_project, excludes)
 
-    text =
-      if opts[:overview],
-        do: overview(project, opts),
-        else: chart(project, full_project, prefixes, opts)
+    {text, chart_warnings} =
+      cond do
+        opts[:snapshot] -> {Snapshot.write(project), []}
+        opts[:overview] -> {overview(project, opts), []}
+        true -> chart(project, full_project, prefixes, excludes, opts)
+      end
 
-    with {:error, reason} <- File.write(output, text) do
-      Mix.raise("Can't write #{output}: #{:file.format_error(reason)}")
-    end
+    write!(output, text)
 
     warnings =
       warnings ++
         exclude_warnings ++
+        chart_warnings ++
         umbrella_warnings(project, opts) ++
-        if(opts[:format] == "edges", do: [], else: Mermaid.limit_warnings(text)) ++
+        if(opts[:format] == "edges" or opts[:snapshot],
+          do: [],
+          else: Mermaid.limit_warnings(text)
+        ) ++
         version_warnings
 
     Enum.each(warnings, &Mix.shell().error("warning: " <> &1))
@@ -142,6 +161,24 @@ defmodule Mix.Tasks.Xref.Mermaid do
     from_or_to? = Keyword.has_key?(opts, :from) or Keyword.has_key?(opts, :to)
 
     cond do
+      opts[:snapshot] && (prefixes != [] or Keyword.keys(opts) -- [:snapshot, :output] != []) ->
+        Mix.raise("--snapshot writes the whole project; it takes only --output")
+
+      opts[:snapshot] ->
+        if !opts[:output], do: Mix.raise("Missing --output"), else: :ok
+
+      opts[:since] && (opts[:overview] || opts[:format] == "edges") ->
+        Mix.raise("--since goes with a chart, not --overview or --format edges")
+
+      Keyword.has_key?(opts, :changes) and !opts[:since] ->
+        Mix.raise("--changes goes with --since")
+
+      Keyword.has_key?(opts, :marks) and !opts[:since] ->
+        Mix.raise("--marks goes with --since")
+
+      opts[:marks] not in [nil, "colors", "labels", "both"] ->
+        Mix.raise("--marks is colors, labels or both")
+
       opts[:format] not in [nil, "mermaid", "edges"] ->
         Mix.raise("--format is mermaid or edges")
 
@@ -240,8 +277,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
     |> then(fn {excludes, warnings} -> {excludes, Enum.reject(warnings, &is_nil/1)} end)
   end
 
-  defp chart(project, full_project, prefixes, opts) do
-    prefixes = Enum.map(prefixes, &relative_prefix!(&1, project))
+  defp chart(project, full_project, prefixes, excludes, opts) do
+    snapshot = opts[:since] && read_snapshot!(opts[:since])
+    prefixes = Enum.map(prefixes, &relative_prefix!(&1, project, snapshot))
     resolve = &resolve!(project, full_project, &1)
 
     selection_opts =
@@ -252,17 +290,67 @@ defmodule Mix.Tasks.Xref.Mermaid do
       ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
 
     selection = Selection.select(project, selection_opts)
-    selection = if opts[:modules], do: Selection.by_file(project, selection), else: selection
 
-    if opts[:format] == "edges",
-      do: Edges.write(project, selection),
-      else: Mermaid.write(project, selection, opts)
+    changes =
+      snapshot &&
+        Changes.compare(project, snapshot, Source.hashes(project, Map.keys(selection.files)),
+          prefixes: prefixes,
+          excludes: excludes,
+          external: opts[:external] == true
+        )
+
+    if path = opts[:changes] do
+      write!(path, Changes.list(project, selection, changes))
+    end
+
+    selection =
+      if opts[:modules],
+        do:
+          Selection.by_file(
+            project,
+            selection,
+            if(changes, do: changes.new_calls, else: MapSet.new())
+          ),
+        else: selection
+
+    text =
+      if opts[:format] == "edges",
+        do: Edges.write(project, selection),
+        else:
+          Mermaid.write(
+            project,
+            selection,
+            Keyword.drop(opts, [:changes]) ++ [changes: changes]
+          )
+
+    {text, if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
   end
 
-  defp relative_prefix!(prefix, project) do
+  defp read_snapshot!(path) do
+    with {:ok, text} <- File.read(path),
+         {:ok, snapshot} <- Snapshot.read(text) do
+      snapshot
+    else
+      {:error, reason} when is_atom(reason) ->
+        Mix.raise("Can't read #{path}: #{:file.format_error(reason)}")
+
+      {:error, message} ->
+        Mix.raise("Can't read #{path} as a snapshot: #{message}")
+    end
+  end
+
+  defp write!(path, text) do
+    with {:error, reason} <- File.write(path, text) do
+      Mix.raise("Can't write #{path}: #{:file.format_error(reason)}")
+    end
+  end
+
+  # With `--since`, a prefix may match only files of the snapshot: a slice the change removed.
+  defp relative_prefix!(prefix, project, snapshot) do
     relative = relative_prefix(prefix, project)
 
-    if not matches_file?(project, relative) do
+    if not matches_file?(project, relative) and
+         !(snapshot && Enum.any?(snapshot.files, &String.starts_with?(&1, relative))) do
       Mix.raise("No file of the project starts with #{prefix}")
     end
 

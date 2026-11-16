@@ -7,7 +7,7 @@ defmodule XrefMermaid.Mermaid do
   (`lib/a/b.ex` and `lib/a_b.ex`) gets a `_2`, `_3`... suffix.
   """
 
-  alias XrefMermaid.Project
+  alias XrefMermaid.{Changes, Project}
 
   # A labeled file dependency is written `a <open> kind <close> b`.
   @file_arrows %{
@@ -27,7 +27,7 @@ defmodule XrefMermaid.Mermaid do
     * `:legend` - adds a legend subgraph
     * `:details` - adds each function's first `@spec` and the start of its `@doc` to its label
     * `:call_order` - numbers each function's calls in the order its code makes them
-    * `:modules` - the selection is one between files (`XrefMermaid.Selection.by_file/2`): each file is a node
+    * `:modules` - the selection is one between files (`XrefMermaid.Selection.by_file/3`): each file is a node
       labeled with its main module, and its calls to another file are one arrow labeled with their count
 
   A file holding a start function (`from`/`to`) is never collapsed.
@@ -69,11 +69,14 @@ defmodule XrefMermaid.Mermaid do
 
     ## Text: the directory and file tree, the external modules, the arrows, then the styles and links
 
+    marks = marks(project, selection, opts)
+
     context = %{
       ids: ids,
       project: project,
       selection: selection,
       opts: opts,
+      marks: marks,
       module_parts: module_parts,
       children: Enum.group_by(dirs, &Path.dirname/1),
       files_in: Enum.group_by(files, &Path.dirname/1)
@@ -95,20 +98,48 @@ defmodule XrefMermaid.Mermaid do
         %{}
       end
 
+    changes = opts[:changes]
+    colors? = changes != nil and opts[:marks] in [nil, "colors", "both"]
+    labels? = changes != nil and opts[:marks] in ["labels", "both"]
+    groups = Project.cycle_groups(project)
+    new? = &(changes != nil and &1 in changes.new_calls)
+
+    # A new call is green; with labels, or on a cycle (red), it gets a `+`.
+    call_label = fn call, number ->
+      plus = new?.(call) and (labels? or cycle_call?(project, groups, call))
+
+      case {plus, number} do
+        {false, nil} -> nil
+        {false, number} -> "#{number}"
+        {true, nil} -> "+"
+        {true, number} -> "+ #{number}"
+      end
+    end
+
+    removed = changes && changes.removed
+
     IO.iodata_to_binary([
       "flowchart LR\n",
+      if(removed, do: "  %% #{Changes.removed_count(removed)}\n", else: ""),
       # Files at the project root sit at the top level, outside any directory.
       Enum.map(Enum.sort(Map.get(context.files_in, ".", [])), &render_file(&1, "  ", context)),
       Enum.map(roots, &render_dir(&1, 1, context)),
       render_externals(externals, ids),
       Enum.map(selection.calls, fn {caller, callee} = call ->
-        case call_numbers[call] do
+        case call_label.(call, call_numbers[call]) do
           nil -> "  #{ids[caller]} --> #{ids[callee]}\n"
-          number -> "  #{ids[caller]} -->|#{number}| #{ids[callee]}\n"
+          label -> "  #{ids[caller]} -->|#{label}| #{ids[callee]}\n"
         end
       end),
       Enum.map(selection.file_calls, fn {source, sink, count} ->
-        "  #{ids[source]} -->|#{count}| #{ids[sink]}\n"
+        label =
+          case Map.get(selection.new_file_calls, {source, sink}, 0) do
+            0 -> "#{count}"
+            # Quoted: Mermaid reads a bare `(` in a label as a node shape.
+            new -> "\"#{count} (+#{new})\""
+          end
+
+        "  #{ids[source]} -->|#{label}| #{ids[sink]}\n"
       end),
       Enum.map(selection.file_edges, fn {source, sink, kind} ->
         {open, close} = @file_arrows[kind]
@@ -116,14 +147,19 @@ defmodule XrefMermaid.Mermaid do
       end),
       cond do
         !opts[:legend] -> ""
-        opts[:modules] -> module_legend()
-        true -> legend()
+        opts[:modules] -> module_legend(change_legend(opts, colors?, labels?, removed))
+        true -> legend(change_legend(opts, colors?, labels?, removed))
       end,
-      case Enum.filter(files, &(&1 in selection.slice_files)) do
+      # A node has one fill: a file's added or changed mark replaces the slice's.
+      case Enum.filter(
+             files,
+             &(&1 in selection.slice_files and not (colors? and Map.has_key?(marks, {:file, &1})))
+           ) do
         [] -> ""
         slice_files -> "  class #{Enum.map_join(slice_files, ",", &ids[{:file, &1}])} slice\n"
       end,
       "  classDef slice fill:#ffe9a8,stroke:#b8860b\n",
+      if(colors?, do: mark_classes(marks, ids), else: ""),
       class_line(functions, &(&1.kind in [:defp, :defmacrop]), "private", ids),
       class_line(functions, & &1.generated?, "generated", ids),
       class_line(functions, &(&1.key in selection.starts), "start", ids),
@@ -138,8 +174,98 @@ defmodule XrefMermaid.Mermaid do
         do: Enum.map(functions, &link_line(&1, ids, project, opts[:link])),
         else: ""
       ),
-      mark_lines(project, selection, opts)
+      mark_lines(project, selection, opts, groups, new?, colors?)
     ])
+  end
+
+  @added_fill "#c7e9c0"
+  @changed_fill "#c6dbef"
+  @new_style "stroke:#2ca02c"
+
+  # `%{{:file, file} | key => :added | :changed}` for the shown files and functions with a mark. A function in an
+  # added file, or a generated one, has none: the file's mark says it all, and the change didn't write a generated
+  # one. With `:modules`, a file that isn't added but holds an added or changed function is changed.
+  defp marks(project, selection, opts) do
+    case opts[:changes] do
+      nil ->
+        %{}
+
+      changes ->
+        file_marks =
+          for file <- Map.keys(selection.files),
+              mark = file_mark(project, file, changes, opts[:modules]),
+              into: %{},
+              do: {{:file, file}, mark}
+
+        function_marks =
+          for {file, keys} <- selection.files,
+              file not in changes.added_files,
+              key <- keys,
+              not project.functions[key].generated?,
+              mark = function_mark(key, changes),
+              into: %{},
+              do: {key, mark}
+
+        Map.merge(file_marks, function_marks)
+    end
+  end
+
+  defp file_mark(project, file, changes, modules?) do
+    cond do
+      file in changes.added_files ->
+        :added
+
+      modules? &&
+          Enum.any?(
+            project.functions,
+            fn {key, function} ->
+              function.file == file and not function.generated? and
+                  function_mark(key, changes) != nil
+            end
+          ) ->
+        :changed
+
+      true ->
+        nil
+    end
+  end
+
+  defp function_mark(key, changes) do
+    cond do
+      key in changes.added -> :added
+      key in changes.changed -> :changed
+      true -> nil
+    end
+  end
+
+  defp mark_classes(marks, ids) do
+    for mark <- [:added, :changed] do
+      case for({owner, ^mark} <- marks, do: ids[owner]) |> Enum.sort() do
+        [] -> ""
+        matching -> "  class #{Enum.join(matching, ",")} #{mark}\n"
+      end
+    end ++
+      ["  classDef added fill:#{@added_fill}\n", "  classDef changed fill:#{@changed_fill}\n"]
+  end
+
+  defp mark_label(context, owner) do
+    if context.opts[:changes] && context.opts[:marks] in ["labels", "both"] do
+      case context.marks[owner] do
+        :added -> "+ "
+        :changed -> "~ "
+        nil -> ""
+      end
+    else
+      ""
+    end
+  end
+
+  defp cycle_call?(_project, _groups, {_, {:external, _}}), do: false
+
+  defp cycle_call?(project, groups, {caller, callee}) do
+    source = project.functions[caller].file
+    sink = project.functions[callee].file
+    source != sink and groups[source] != nil and groups[source] == groups[sink]
   end
 
   @cycle_style "stroke:#d62728"
@@ -148,31 +274,37 @@ defmodule XrefMermaid.Mermaid do
   # `linkStyle` lines for the marked call arrows, which Mermaid finds by their place among all the arrows: the calls
   # come first, then the file dependencies, then the legend's. Mermaid keeps only the last `linkStyle` naming an
   # arrow, so an arrow with both marks gets one line with both styles.
-  defp mark_lines(project, selection, opts) do
-    groups = Project.cycle_groups(project)
+  defp mark_lines(project, selection, opts, groups, new?, colors?) do
     file_of = fn key -> project.functions[key].file end
 
+    # Each arrow's files (`nil` for an external end) and whether it carries a new call.
     ends =
       Enum.map(selection.calls, fn
-        {_, {:external, _}} -> nil
-        {caller, callee} -> {file_of.(caller), file_of.(callee)}
+        {_, {:external, _}} = call -> {nil, new?.(call)}
+        {caller, callee} = call -> {{file_of.(caller), file_of.(callee)}, new?.(call)}
       end) ++
         Enum.map(selection.file_calls, fn
-          {{:file, source}, {:file, sink}, _} -> {source, sink}
-          _ -> nil
+          {{:file, source}, {:file, sink} = to, _} ->
+            {{source, sink}, Map.get(selection.new_file_calls, {{:file, source}, to}, 0) > 0}
+
+          {source, sink, _} ->
+            {nil, Map.get(selection.new_file_calls, {source, sink}, 0) > 0}
         end)
 
     styles =
-      for {{source, sink}, index} <- Enum.with_index(ends),
-          style = style(project, groups, source, sink),
+      for {{files, new}, index} <- Enum.with_index(ends),
+          style = style(project, groups, files, colors? and new),
           style != "",
           do: {index, style}
 
-    # The legend's two last arrows show the marks.
+    # The legend's arrows after the first two show the marks.
     styles =
       if opts[:legend] do
         legend_start = length(ends) + length(selection.file_edges)
-        styles ++ [{legend_start + 2, @parent_style}, {legend_start + 3, @cycle_style}]
+
+        styles ++
+          [{legend_start + 2, @parent_style}, {legend_start + 3, @cycle_style}] ++
+          if(colors?, do: [{legend_start + 4, @new_style}], else: [])
       else
         styles
       end
@@ -183,12 +315,22 @@ defmodule XrefMermaid.Mermaid do
     |> Enum.map(fn {style, indexes} -> "  linkStyle #{Enum.join(indexes, ",")} #{style}\n" end)
   end
 
-  # The style of a call arrow from `source` to `sink`, or "" when it isn't marked.
-  defp style(project, groups, source, sink) do
+  # The style of a call arrow between files (`nil` with an external end), or "" when it isn't marked. A new call on
+  # a cycle stays red; its label says it is new.
+  defp style(_project, _groups, nil, new?), do: if(new?, do: @new_style, else: "")
+
+  defp style(project, groups, {source, sink}, new?) do
     cycle? = source != sink and groups[source] != nil and groups[source] == groups[sink]
     parent? = parent?(main_module(project, sink), main_module(project, source))
 
-    [if(cycle?, do: @cycle_style), if(parent?, do: @parent_style)]
+    [
+      cond do
+        cycle? -> @cycle_style
+        new? -> @new_style
+        true -> nil
+      end,
+      if(parent?, do: @parent_style)
+    ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(",")
   end
@@ -283,14 +425,17 @@ defmodule XrefMermaid.Mermaid do
           _ -> Path.basename(file)
         end
 
-      ~s(#{pad}#{file_id}["#{escape(label)}"]\n)
+      ~s(#{pad}#{file_id}["#{escape(mark_label(context, {:file, file}) <> label)}"]\n)
     else
       [
-        ~s(#{pad}subgraph #{file_id} ["#{escape(Path.basename(file))}"]\n),
+        ~s(#{pad}subgraph #{file_id} ["#{escape(mark_label(context, {:file, file}) <> Path.basename(file))}"]\n),
         Enum.map(keys, fn key ->
           function = context.project.functions[key]
           {label_prefix, _} = parts[function.module]
-          label = "#{label_prefix}#{function.name}/#{arities(function)}"
+
+          label =
+            "#{mark_label(context, key)}#{label_prefix}#{function.name}/#{arities(function)}"
+
           ~s(#{pad}  #{ids[key]}["#{details(label, function, opts)}"]\n)
         end),
         "#{pad}end\n",
@@ -431,34 +576,66 @@ defmodule XrefMermaid.Mermaid do
     ~s(  click #{ids[function.key]} href "#{url}"\n)
   end
 
-  defp legend do
-    """
-      subgraph legend_ ["Legend"]
-        legend_public["public function"]
-        legend_private["private function"]:::private
-        legend_generated["generated function"]:::generated
-        legend_start["start function"]:::start
-        legend_slice["file of the slice"]:::slice
-        legend_caller["caller"] --> legend_called["called"]
-        legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
-        legend_child["caller"] --> legend_parent["its parent module"]
-        legend_cycle["caller"] --> legend_cycle_called["called, on a cycle of calls between files"]
-      end
-    """
+  defp legend(extra) do
+    [
+      """
+        subgraph legend_ ["Legend"]
+          legend_public["public function"]
+          legend_private["private function"]:::private
+          legend_generated["generated function"]:::generated
+          legend_start["start function"]:::start
+          legend_slice["file of the slice"]:::slice
+          legend_caller["caller"] --> legend_called["called"]
+          legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+          legend_child["caller"] --> legend_parent["its parent module"]
+          legend_cycle["caller"] --> legend_cycle_called["called, on a cycle of calls between files"]
+      """,
+      extra,
+      "  end\n"
+    ]
   end
 
-  defp module_legend do
-    """
-      subgraph legend_ ["Legend"]
-        legend_module["file, by its main module"]
-        legend_start["file of a start function"]:::start
-        legend_slice["file of the slice"]:::slice
-        legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
-        legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
-        legend_child["calling file"] --> legend_parent["its parent module"]
-        legend_cycle["calling file"] --> legend_cycle_called["called file, on a cycle of calls between files"]
-      end
-    """
+  # The legend's lines for the marks of `:changes`, after its other lines; its arrow comes after theirs.
+  defp change_legend(opts, colors?, labels?, removed) do
+    if opts[:changes] do
+      {plus, tilde} = if labels?, do: {"+ ", "~ "}, else: {"", ""}
+      {added, changed} = if colors?, do: {":::added", ":::changed"}, else: {"", ""}
+
+      {added_text, changed_text, arrow} =
+        if opts[:modules],
+          do:
+            {"added file", "file with added or changed functions",
+             ~s{legend_new_caller["calling file"] -->|"3 (+1)"| legend_new_called["3 calls, 1 of them new"]}},
+          else:
+            {"added function, or file", "changed function",
+             ~s(legend_new_caller["caller"] #{if labels?, do: "-->|+|", else: "-->"} legend_new_called["called, a new call"])}
+
+      [
+        ~s(    legend_added["#{plus}#{added_text}"]#{added}\n),
+        ~s(    legend_changed["#{tilde}#{changed_text}"]#{changed}\n),
+        "    #{arrow}\n",
+        if(removed, do: ~s(    legend_removed["#{Changes.removed_count(removed)}"]\n), else: "")
+      ]
+    else
+      ""
+    end
+  end
+
+  defp module_legend(extra) do
+    [
+      """
+        subgraph legend_ ["Legend"]
+          legend_module["file, by its main module"]
+          legend_start["file of a start function"]:::start
+          legend_slice["file of the slice"]:::slice
+          legend_caller["calling file"] -->|3| legend_called["called file: 3 distinct function calls"]
+          legend_file["file"] -. runtime .-> legend_dependency["file it depends on with no call"]
+          legend_child["calling file"] --> legend_parent["its parent module"]
+          legend_cycle["calling file"] --> legend_cycle_called["called file, on a cycle of calls between files"]
+      """,
+      extra,
+      "  end\n"
+    ]
   end
 
   # A file's directory as path parts; `[]` for a file at the project root.

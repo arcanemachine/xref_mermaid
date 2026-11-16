@@ -12,11 +12,12 @@ defmodule XrefMermaid.Beam do
   `line` is the line of the module's `defmodule`. `impl` is `{protocol, for}` for a protocol implementation, and
   `nil` for any other module.
 
-  `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, generated?: boolean, doc: doc, specs:
-  specs}`, one per definition in file order: a function with default arguments is one entry with several arities.
-  `kind` is `:def`, `:defp`, `:defmacro` or `:defmacrop`. `generated?` marks functions that `use` or another macro
-  has defined. `doc` is the `@doc` text (`nil` without one) and `specs` the `@spec`s as text, short for a label: without
-  the function's name, and with module names cut to their last part (`(Order.t()) :: :ok`). Functions named like `__struct__` are left out.
+  `functions` holds `%{name: name, arities: [arity], kind: kind, line: line, lines: [line], generated?: boolean, doc:
+  doc, specs: specs}`, one per definition in file order: a function with default arguments is one entry with several
+  arities. `kind` is `:def`, `:defp`, `:defmacro` or `:defmacrop`. `lines` are the lines of the definition and its
+  clauses. `generated?` marks functions that `use` or another macro has defined. `doc` is the `@doc` text (`nil`
+  without one) and `specs` the `@spec`s as text, short for a label: without the function's name, and with module names
+  cut to their last part (`(Order.t()) :: :ok`). Functions named like `__struct__` are left out.
 
   `calls` holds `{{name, arity}, {module, name, arity}}`: the caller in this module and the function called,
   once per pair, recursion left out. Calls through a variable (`apply/3`, `module.fun()`) can't be resolved.
@@ -56,7 +57,7 @@ defmodule XrefMermaid.Beam do
       {docs, specs} = if opts[:details], do: {docs(binary), specs(binary)}, else: {%{}, %{}}
 
       functions =
-        for {{name, arity}, kind, meta, _} <- definitions,
+        for {{name, arity}, kind, meta, clauses} <- definitions,
             not Map.has_key?(full_arity_of, {name, kind, arity}) do
           arities = Enum.to_list((arity - Keyword.get(meta, :defaults, 0))..arity)
 
@@ -65,6 +66,8 @@ defmodule XrefMermaid.Beam do
             arities: arities,
             kind: kind,
             line: meta[:line],
+            # The source lines of the definition and its clauses, which find its `def`s in the source.
+            lines: Enum.uniq([meta[:line] | Enum.map(clauses, &elem(&1, 0)[:line])]),
             generated?: meta[:context] != nil,
             doc: docs[{name, arity}],
             # A function with default arguments may have a spec for each arity; the full arity's comes first.

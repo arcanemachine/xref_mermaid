@@ -11,8 +11,8 @@ defmodule XrefMermaid.TestProject do
 
   @doc """
   Builds a project from `modules`: `{module, file, functions, calls}` or `{module, file, functions, calls, opts}`,
-  where `functions` are `{name, arities, kind, line}` (add `generated: true` in a fifth element) and `file` is
-  relative. Every file is in the file graph; `file_edges` adds dependencies.
+  where `functions` are `{name, arities, kind, line}` (add options in a fifth element: `generated: true`, `lines:
+  [line]` for its clauses' lines) and `file` is relative. Every file is in the file graph; `file_edges` adds dependencies.
   """
   def build(modules, file_edges \\ %{}) do
     modules =
@@ -33,20 +33,21 @@ defmodule XrefMermaid.TestProject do
       impl: Keyword.get(opts, :impl),
       functions:
         Enum.map(functions, fn
-          {name, arities, kind, line} -> function(name, arities, kind, line, false)
-          {name, arities, kind, line, generated} -> function(name, arities, kind, line, generated)
+          {name, arities, kind, line} -> function(name, arities, kind, line, [])
+          {name, arities, kind, line, opts} -> function(name, arities, kind, line, opts)
         end),
       calls: calls
     }
   end
 
-  defp function(name, arities, kind, line, generated) do
+  defp function(name, arities, kind, line, opts) do
     %{
       name: name,
       arities: arities,
       kind: kind,
       line: line,
-      generated?: generated == [generated: true],
+      lines: Keyword.get(opts, :lines, [line]),
+      generated?: Keyword.get(opts, :generated, false),
       doc: nil,
       specs: []
     }

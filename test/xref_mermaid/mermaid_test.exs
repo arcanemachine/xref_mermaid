@@ -411,6 +411,102 @@ defmodule XrefMermaid.MermaidTest do
     refute text =~ "stroke-width:4px"
   end
 
+  describe "write/3 with `changes`" do
+    # `notes.ex` and `save/1` are added, `check/1` changed; `place/1`'s calls to them are new, and `orders.ex` and
+    # `notes.ex` call each other (a cycle).
+    setup do
+      project =
+        TestProject.build([
+          {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 2}, {:check, [1], :def, 4}],
+           [
+             {{:place, 1}, {Shop.Notes, :note, 1}},
+             {{:place, 1}, {Shop.Repo, :insert, 1}},
+             {{:place, 1}, {Shop.Repo, :save, 1}}
+           ]},
+          {Shop.Notes, "lib/shop/notes.ex", [{:note, [1], :def, 2}],
+           [{{:note, 1}, {Shop.Orders, :check, 1}}]},
+          {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}, {:save, [1], :def, 4}], []}
+        ])
+
+      changes = %XrefMermaid.Changes{
+        added_files: MapSet.new(["lib/shop/notes.ex"]),
+        added: MapSet.new([{Shop.Notes, :note, 1}, {Shop.Repo, :save, 1}]),
+        changed: MapSet.new([{Shop.Orders, :check, 1}]),
+        new_calls:
+          MapSet.new([
+            {{Shop.Orders, :place, 1}, {Shop.Notes, :note, 1}},
+            {{Shop.Orders, :place, 1}, {Shop.Repo, :save, 1}},
+            {{Shop.Notes, :note, 1}, {Shop.Orders, :check, 1}}
+          ]),
+        removed: %{files: [], functions: ["Shop.Orders.gone/0"], calls: []}
+      }
+
+      selection = Selection.select(project, prefixes: ["lib/shop/orders.ex"])
+      %{project: project, changes: changes, selection: selection}
+    end
+
+    test "colors added and changed functions and files, and new calls", context do
+      text =
+        Mermaid.write(context.project, context.selection, changes: context.changes, legend: true)
+
+      assert text =~ "flowchart LR\n  %% removed: 0 files, 1 function, 0 calls\n"
+
+      # Arrows, in order: to note/1 (new, on the cycle: red, with a `+`), to insert/1, to save/1 (new: green).
+      assert text =~
+               "  f_orders__place_1 -->|+| f_notes__note_1\n" <>
+                 "  f_orders__place_1 --> f_repo__insert_1\n" <>
+                 "  f_orders__place_1 --> f_repo__save_1\n"
+
+      # The legend's last arrow shows a new call.
+      assert text =~ "  linkStyle 2,7 stroke:#2ca02c\n  linkStyle 0,6 stroke:#d62728\n"
+
+      # A function of an added file has no mark of its own: the file has it.
+      assert text =~ "  class f_notes,f_repo__save_1 added\n"
+      assert text =~ "  class f_orders__check_1 changed\n"
+      assert text =~ "  class f_orders slice\n"
+      refute text =~ "+ "
+
+      assert text =~ ~s(legend_added["added function, or file"]:::added)
+      assert text =~ ~s(legend_removed["removed: 0 files, 1 function, 0 calls"])
+    end
+
+    test "with `marks: labels`, marks with `+` and `~` instead of colors", context do
+      text =
+        Mermaid.write(context.project, context.selection,
+          changes: context.changes,
+          marks: "labels"
+        )
+
+      assert text =~ ~s(subgraph f_notes ["+ notes.ex"])
+      assert text =~ ~s(f_notes__note_1["note/1"])
+      assert text =~ ~s(f_repo__save_1["+ save/1"])
+      assert text =~ ~s(f_orders__check_1["~ check/1"])
+      assert text =~ "  f_orders__place_1 -->|+| f_repo__save_1\n"
+      refute text =~ "#2ca02c"
+      refute text =~ "classDef added"
+      assert text =~ "  class f_orders slice\n"
+
+      both =
+        Mermaid.write(context.project, context.selection, changes: context.changes, marks: "both")
+
+      assert both =~ ~s(f_repo__save_1["+ save/1"])
+      assert both =~ "class f_notes,f_repo__save_1 added"
+    end
+
+    test "with `modules`, marks the files and counts the new calls on each arrow", context do
+      selection = Selection.by_file(context.project, context.selection, context.changes.new_calls)
+      text = Mermaid.write(context.project, selection, modules: true, changes: context.changes)
+
+      assert text =~ ~s{f_orders -->|"1 (+1)"| f_notes\n}
+      assert text =~ ~s{f_orders -->|"2 (+1)"| f_repo\n}
+
+      # A file holding an added or changed function is changed, and loses the slice's fill.
+      assert text =~ "  class f_notes added\n"
+      assert text =~ "  class f_orders,f_repo changed\n"
+      refute text =~ "class f_orders slice"
+    end
+  end
+
   test "write_overview/1 draws one node per directory and labeled arrows" do
     overview = %{
       dirs: ["lib/*", "lib/app/orders/"],

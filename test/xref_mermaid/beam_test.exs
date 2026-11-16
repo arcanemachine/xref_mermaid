@@ -49,6 +49,21 @@ defmodule XrefMermaid.BeamTest do
            ]
   end
 
+  test "lists the lines of a function's definition and clauses" do
+    [module] =
+      read("""
+      defmodule BeamTest.Lines do
+        def count(list, acc \\\\ 0)
+        def count([], acc), do: acc
+
+        def count([_ | rest], acc),
+          do: count(rest, acc + 1)
+      end
+      """)
+
+    assert [%{name: :count, arities: [1, 2], lines: [2, 3, 5]}] = module.functions
+  end
+
   test "reads docs, and specs shortened for a label" do
     [module] =
       read("""

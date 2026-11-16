@@ -77,6 +77,47 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   characters. Labels grow, so it reads best on a few files or a `--from` walk.
 - `--call-order`: numbers each function's calls (`-->|1|`) in the order its code first makes them.
 
+### What changed
+
+Mark what a commit or a branch added, changed and removed: take a snapshot of the project before, then draw it after
+with `--since`. The task doesn't run `git`; check out and compile each state yourself, for example in a throwaway
+copy:
+
+```bash
+git checkout HEAD~1                                  # the state before (or main, for a whole branch)
+mix xref.mermaid --snapshot -o before.snapshot      # the whole project, as it was
+git checkout -                                       # back to the change
+mix xref.mermaid lib/my_app/orders/ --since before.snapshot --changes changes.txt -o orders.mmd
+```
+
+- `--snapshot`: instead of a chart, writes the whole project (files, functions, calls) as text, to compare with
+  later. It takes only `-o`.
+- `--since SNAPSHOT`: marks what is new since the snapshot: added files and functions (green), changed functions
+  (blue) and new calls (green arrows). A function in an added file has no mark of its own; its file has it. With
+  `--modules`, a file holding an added or changed function is blue, and an arrow carrying new calls is green and
+  counts them (`5 (+2)`: 5 calls, 2 of them new). A new call on a cycle stays red, labeled `+`. A path prefix may
+  match only files of the snapshot (a slice the change removed). Not with `--overview` or `--format edges`.
+- `--changes FILE`: also writes the changes as text, one sorted line each: `+ file lib/my_app/orders/line.ex`,
+  `+ function MyApp.Orders.place/1..2`, `~ function ...` (changed), `+ call MyApp.Orders.place/1 ->
+  MyApp.Repo.insert/1`, then what is removed (`- file`, `- function`, `- call`) and a line counting it.
+- `--marks colors|labels|both`: how marks show. `colors` (the default) as above; `labels` puts `+` (added) or `~`
+  (changed) before a name and `+` on a new call's arrow, with no colors; `both` does both.
+
+What counts:
+
+- A file is known by its path; a function by its module and name, and is the same function as before when it
+  shares an arity (adding a default argument to `place/2` doesn't make `place/1..2` new); a call by its two ends. So
+  a module moved to another file makes the file new, not its functions, and a renamed function is removed and added.
+- A function is changed when its source changed: its `def`s, heads, guards and bodies, not comments, blank lines or
+  line numbers. A struct gaining a field, or a macro or attribute it uses changing, doesn't change it. A function
+  with no `def` of its own in the source (`defdelegate`, one a macro writes) is never changed, and generated
+  functions get no marks.
+- Removed files, functions and calls are counted in the files the path prefixes match (a `%%` comment in the chart,
+  and a line in the legend); without path prefixes, nothing is counted. They can't be drawn in a chart of the
+  change.
+- Run both states from the same directory (both at an umbrella root, or both in the same app); the task warns when
+  no file of the snapshot is a file of the project.
+
 ### Version check
 
 A development feature, which may be removed: with `XREF_MERMAID_VERSION_CHECK=1` set, the task asks GitHub whether
@@ -110,6 +151,7 @@ Mermaid draws at most 50,000 characters and 500 arrows by default; the task warn
 - Functions and calls: the Elixir debug info in the project's `.beam` files, which Mix keeps by default. The task
   warns about modules without it.
 - Docs and specs (`--details`): the `.beam` files' docs chunk and debug info.
+- Changed functions (`--since`): the project's source files, parsed.
 
 What it can't see:
 

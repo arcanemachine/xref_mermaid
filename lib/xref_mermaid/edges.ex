@@ -5,7 +5,7 @@ defmodule XrefMermaid.Edges do
 
   @doc """
   One sorted line per call in `selection` (from `XrefMermaid.Selection.select/2`): `Mod.fun/arity -> Mod.fun/arity`,
-  each function named by its lowest arity. For a selection between files (`XrefMermaid.Selection.by_file/2`), one
+  each function named by its lowest arity. For a selection between files (`XrefMermaid.Selection.by_file/3`), one
   line per pair of files, by their main modules, with the count of calls: `ModA -> ModB 3`.
   """
   def write(project, selection) do
