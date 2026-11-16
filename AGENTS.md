@@ -36,3 +36,9 @@ mix test --include integration  # also builds the archive and runs the task on t
 ```
 
 The integration tests run `mix` as a separate process, in a temporary directory, the way the task really runs.
+
+**Fixtures.** A fixture is a small, made-up project in `test/fixtures/` that tests run the task on. Prefer extending an
+existing fixture over adding a new one; add one only when the case cannot live in an existing one (e.g. an umbrella
+needs its own project). Everything added stays generic and earns its place: a test uses it. Tests share a fixture, and
+some results span the whole project (the cycle marks, `--overview`), so check that an addition leaves the other tests'
+results as they were.
