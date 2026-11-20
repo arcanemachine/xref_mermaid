@@ -59,7 +59,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     * `--snapshot` - instead of a chart, writes the whole project as text to compare with later; takes only `-o`
     * `--since SNAPSHOT` - marks what is added (green), changed (blue) and new calls (green arrows) since the
-      snapshot; not with `--overview` or `--format edges`
+      snapshot; a function is changed when its source is, a clause added included; not with `--overview` or
+      `--format edges`
     * `--changes FILE` - with `--since`, also writes the changes as text, one line each, and the removed counts
     * `--marks MARKS` - with `--since`: `colors` (the default), `labels` (`+` and `~` before names, no colors) or
       `both`

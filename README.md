@@ -22,6 +22,7 @@ mix xref.mermaid lib/my_app/orders.ex lib/my_app/orders/ -o orders.mmd   # these
 mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd     # what place/2 calls, 4 hops deep
 mix xref.mermaid --to MyApp.Repo.insert -o inserts.mmd                  # what calls insert, at any arity
 mix xref.mermaid --overview --level 3 -o overview.mmd                   # the project's directories
+mix xref.mermaid lib/my_app/ --since before.snapshot -o change.mmd      # what changed since a --snapshot
 ```
 
 ### What to draw
@@ -110,8 +111,8 @@ What counts:
 - A file is known by its path; a function by its module and name, and is the same function as before when it
   shares an arity (adding a default argument to `place/2` doesn't make `place/1..2` new); a call by its two ends. So
   a module moved to another file makes the file new, not its functions, and a renamed function is removed and added.
-- A function is changed when its source changed: its `def`s, heads, guards and bodies, not comments, blank lines or
-  line numbers. A struct gaining a field, or a macro or attribute it uses changing, doesn't change it. A function
+- A function is changed when its source changed: its `def`s, heads, guards and bodies (a clause added counts), not
+  comments, blank lines or line numbers. A struct gaining a field, or a macro or attribute it uses changing, doesn't change it. A function
   with no `def` of its own in the source (`defdelegate`, one a macro writes) is never changed, and generated
   functions get no marks.
 - Removed files, functions and calls are counted in the files the path prefixes match (a `%%` comment in the chart,
