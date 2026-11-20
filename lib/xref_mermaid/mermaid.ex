@@ -122,6 +122,7 @@ defmodule XrefMermaid.Mermaid do
     IO.iodata_to_binary([
       "flowchart #{Keyword.get(opts, :direction, "LR")}\n",
       if(removed, do: "  %% #{Changes.removed_count(removed)}\n", else: ""),
+      Enum.map(cut_texts(selection, opts), &"  %% #{&1}\n"),
       # Files at the project root sit at the top level, outside any directory.
       Enum.map(Enum.sort(Map.get(context.files_in, ".", [])), &render_file(&1, "  ", context)),
       Enum.map(roots, &render_dir(&1, 1, context)),
@@ -147,9 +148,14 @@ defmodule XrefMermaid.Mermaid do
         "  #{ids[{:file, source}]} #{open} #{kind} #{close} #{ids[{:file, sink}]}\n"
       end),
       cond do
-        !opts[:legend] -> ""
-        opts[:modules] -> module_legend(change_legend(opts, colors?, labels?, removed))
-        true -> legend(change_legend(opts, colors?, labels?, removed))
+        !opts[:legend] ->
+          ""
+
+        opts[:modules] ->
+          module_legend(change_legend(opts, colors?, labels?, removed))
+
+        true ->
+          legend([cut_legend(selection, opts), change_legend(opts, colors?, labels?, removed)])
       end,
       # A node has one fill: a file's added or changed mark replaces the slice's.
       case Enum.filter(
@@ -436,7 +442,9 @@ defmodule XrefMermaid.Mermaid do
           {label_prefix, _} = parts[function.module]
 
           label =
-            "#{mark_label(context, key)}#{label_prefix}#{function.name}/#{arities(function)}"
+            "#{if key in selection.more_callers, do: "… "}#{mark_label(context, key)}" <>
+              "#{label_prefix}#{function.name}/#{arities(function)}" <>
+              "#{if key in selection.more_callees, do: " …"}"
 
           ~s(#{pad}  #{ids[key]}["#{details(label, function, opts)}"]\n)
         end),
@@ -576,6 +584,29 @@ defmodule XrefMermaid.Mermaid do
       |> String.replace("{line}", to_string(function.line))
 
     ~s(  click #{ids[function.key]} href "#{url}"\n)
+  end
+
+  # What the marks of the functions the depth cut off mean, for the functions that have them: `… ` before a name, or
+  # ` …` after it.
+  defp cut_texts(selection, opts) do
+    depth = Keyword.get(opts, :depth, 3)
+
+    [
+      if(MapSet.size(selection.more_callees) > 0,
+        do: "name …: it makes calls past --depth #{depth}, not drawn"
+      ),
+      if(MapSet.size(selection.more_callers) > 0,
+        do: "… name: it gets calls past --depth #{depth}, not drawn"
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp cut_legend(selection, opts) do
+    selection
+    |> cut_texts(opts)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {text, index} -> ~s(    legend_cut_#{index}["#{escape(text)}"]\n) end)
   end
 
   # The legend reads left to right in every chart direction: in a top-to-bottom chart it sits beside the chart, and

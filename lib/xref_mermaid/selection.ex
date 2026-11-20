@@ -17,8 +17,10 @@ defmodule XrefMermaid.Selection do
 
   @doc """
   Returns `%{files: %{file => [key]}, slice_files: MapSet, calls: [{caller, callee}], file_edges: [{source, sink,
-  kind}], starts: MapSet, externals: %{module => [key]}, file_calls: [], new_file_calls: %{}, start_files:
-  MapSet}`; `file_calls`, `new_file_calls` and `start_files` are filled by `by_file/3`.
+  kind}], starts: MapSet, more_callees: MapSet, more_callers: MapSet, externals: %{module => [key]}, file_calls: [],
+  new_file_calls: %{}, start_files: MapSet}`; `file_calls`, `new_file_calls` and `start_files` are filled by
+  `by_file/3`. `more_callees` holds the functions a `from:` walk reached that make a call not drawn (the depth cut
+  it off), and `more_callers` those a `to:` walk reached that get one.
 
   Options: `prefixes`, `from`, `to`, `depth` (default 3), `incoming` (also the calls into the slice files and the
   file dependencies on them), `all_functions`, `external` (also calls to Elixir modules outside the project, as
@@ -57,14 +59,34 @@ defmodule XrefMermaid.Selection do
 
     depth = Keyword.get(opts, :depth, 3)
 
+    from = Keyword.get(opts, :from, [])
+    to = Keyword.get(opts, :to, [])
+    from_calls = walk(project.forward, from, depth, keep?, :forward)
+    to_calls = walk(project.backward, to, depth, keep?, :backward)
+
     # The slice's own calls (and, with `incoming`, the calls into the slice) are one step from its functions.
     calls =
       (walk(project.forward, slice_functions, 1, keep?, :forward) ++
          if(incoming?, do: walk(project.backward, slice_functions, 1, keep?, :backward), else: []) ++
-         walk(project.forward, Keyword.get(opts, :from, []), depth, keep?, :forward) ++
-         walk(project.backward, Keyword.get(opts, :to, []), depth, keep?, :backward))
+         from_calls ++ to_calls)
       |> Enum.uniq()
       |> Enum.sort()
+
+    # The functions a walk reached that make (or get) a call the chart doesn't draw: those the depth cut off.
+    drawn = MapSet.new(calls)
+
+    more_callees =
+      for key <- MapSet.new(from ++ Enum.map(from_calls, &elem(&1, 1))),
+          not match?({:external, _}, key),
+          Enum.any?(Map.get(project.forward, key, []), &(keep?.(&1) and {key, &1} not in drawn)),
+          into: MapSet.new(),
+          do: key
+
+    more_callers =
+      for key <- MapSet.new(to ++ Enum.map(to_calls, &elem(&1, 0))),
+          Enum.any?(Map.get(project.backward, key, []), &({&1, key} not in drawn)),
+          into: MapSet.new(),
+          do: key
 
     ## File dependencies that no drawn call explains
 
@@ -113,6 +135,8 @@ defmodule XrefMermaid.Selection do
       calls: calls,
       file_edges: Enum.sort(file_edges),
       starts: MapSet.new(starts),
+      more_callees: more_callees,
+      more_callers: more_callers,
       externals: externals,
       file_calls: [],
       new_file_calls: %{},
@@ -155,7 +179,8 @@ defmodule XrefMermaid.Selection do
   Turns a selection (from `select/2`) into one between files, for a chart of one node per file: its calls become
   `file_calls`, `[{source, sink, count}]`, where `source` and `sink` are `{:file, file}` or `{:external_module,
   module}` and `count` is the number of distinct function-to-function calls between them; calls within a file drop
-  out. Its files and external modules list no functions, and `start_files` holds the files of the start functions.
+  out. Its files and external modules list no functions, `more_callees` and `more_callers` are empty, and
+  `start_files` holds the files of the start functions.
   `new_file_calls` counts, per `{source, sink}`, those of its calls in `new_calls` (`XrefMermaid.Changes`).
   """
   def by_file(project, selection, new_calls \\ MapSet.new()) do
@@ -183,6 +208,8 @@ defmodule XrefMermaid.Selection do
       | files: Map.new(selection.files, fn {file, _} -> {file, []} end),
         externals: Map.new(selection.externals, fn {module, _} -> {module, []} end),
         calls: [],
+        more_callees: MapSet.new(),
+        more_callers: MapSet.new(),
         file_calls: file_calls,
         new_file_calls: new_file_calls,
         start_files: MapSet.new(selection.starts, &project.functions[&1].file)

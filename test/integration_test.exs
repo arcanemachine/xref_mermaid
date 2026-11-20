@@ -93,6 +93,11 @@ defmodule XrefMermaid.IntegrationTest do
     assert text =~ "f_orders__receipt_1 --> f_orders__total_1"
     assert text =~ "class f_orders__place_1,f_totals__total_1 start"
     refute text =~ "f_receipt"
+
+    # One hop out, `save/1`'s calls are cut off.
+    {text, _log} = chart(["--from", "Sample.Orders.place", "--depth", "1"], context)
+    assert text =~ ~s(f_repo__save_1["save/1 …"])
+    assert text =~ "%% name …: it makes calls past --depth 1, not drawn"
   end
 
   test "adds specs and docs, and numbers calls in the order the code runs them", context do

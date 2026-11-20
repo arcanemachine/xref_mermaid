@@ -161,6 +161,34 @@ defmodule XrefMermaid.SelectionTest do
     assert leaf.files == %{"lib/shop/rules.ex" => [{Shop.Rules, :limit, 0}]}
   end
 
+  test "a walk marks the functions whose calls the depth cut off", %{project: project} do
+    from = &Selection.select(project, Keyword.put(&1, :from, [{Shop.Orders, :place, 1}]))
+
+    # `allowed?/1`, two hops out, calls `limit/0` and `again/1`; `place/1`'s Elixir and Erlang calls are left out.
+    assert from.(depth: 2).more_callees == MapSet.new([{Shop.Rules, :allowed?, 1}])
+    assert from.(depth: 0).more_callees == MapSet.new([{Shop.Orders, :place, 1}])
+    assert from.(depth: 10).more_callees == MapSet.new()
+    assert from.(depth: 2).more_callers == MapSet.new()
+
+    # A second walk that draws the calls of a function the first one cut off leaves it unmarked.
+    both =
+      Selection.select(project,
+        from: [{Shop.Orders, :place, 1}, {Shop.Rules, :allowed?, 1}],
+        depth: 2
+      )
+
+    assert both.more_callees == MapSet.new()
+
+    to = &Selection.select(project, to: [{Shop.Rules, :limit, 0}], depth: &1)
+    assert to.(1).more_callers == MapSet.new([{Shop.Rules, :allowed?, 1}])
+    assert to.(3).more_callers == MapSet.new([{Shop.Orders, :place, 1}])
+    assert to.(3).more_callees == MapSet.new()
+
+    # A slice's calls are one step from it, not a walk.
+    slice = Selection.select(project, prefixes: ["lib/shop/orders.ex"], incoming: true)
+    assert {slice.more_callees, slice.more_callers} == {MapSet.new(), MapSet.new()}
+  end
+
   test "`external` adds Elixir modules outside the project, but not Erlang modules", %{
     project: project
   } do

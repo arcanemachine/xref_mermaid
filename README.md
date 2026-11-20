@@ -133,6 +133,9 @@ without `git`).
   and the slice files are yellow.
 - A private function has a dashed border, a generated one (from `use` or another macro) is grey, and a `--from` or
   `--to` function has a red border.
+- `…` after a function's name: a `--from` walk reached it, and it makes calls past `--depth` that aren't drawn (run
+  again with a larger `--depth`, or `--from` it). `…` before the name: a `--to` walk reached it, and it gets calls
+  past `--depth`. A `%%` comment at the top of the chart says so, and so does the legend.
 - A function with default arguments is one node (`place/1..2`). In a file with several modules, the main one is the
   module named after the file, or else the first one defined; functions of the others are labeled with their module
   (`Line.describe/1`), and functions of a protocol implementation with the protocol and type

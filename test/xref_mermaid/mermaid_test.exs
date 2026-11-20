@@ -96,6 +96,34 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~ ~s(  subgraph legend_ ["Legend"]\n    direction LR\n)
   end
 
+  test "write/3 marks the functions whose calls the depth cut off, in a comment and the legend",
+       %{
+         project: project
+       } do
+    selection =
+      Selection.select(project,
+        from: [{Shop.Orders, :place, 1}],
+        to: [{Shop.Repo, :insert, 1}],
+        depth: 0
+      )
+
+    text = Mermaid.write(project, selection, depth: 0, legend: true)
+
+    assert text =~ ~s(f_orders__place_1["place/1..2 …"])
+    assert text =~ ~s(f_repo__insert_1["… insert/1"])
+
+    assert text =~
+             "flowchart LR\n  %% name …: it makes calls past --depth 0, not drawn\n" <>
+               "  %% … name: it gets calls past --depth 0, not drawn\n"
+
+    assert text =~ ~s(    legend_cut_1["name …: it makes calls past --depth 0, not drawn"]\n)
+    assert text =~ ~s(    legend_cut_2["… name: it gets calls past --depth 0, not drawn"]\n)
+
+    # Without a cut, no comment.
+    refute Mermaid.write(project, Selection.select(project, from: [{Shop.Orders, :place, 1}])) =~
+             "%%"
+  end
+
   test "write/3 opens every file by default, and collapses the files outside the slice with `all_functions`",
        %{project: project} do
     default = Mermaid.write(project, Selection.select(project, prefixes: ["lib/shop/orders.ex"]))
@@ -492,6 +520,11 @@ defmodule XrefMermaid.MermaidTest do
 
       assert both =~ ~s(f_repo__save_1["+ save/1"])
       assert both =~ "class f_notes,f_repo__save_1 added"
+
+      # The depth's mark goes outside the change's.
+      cut = Selection.select(context.project, to: [{Shop.Orders, :check, 1}], depth: 0)
+      cut_text = Mermaid.write(context.project, cut, changes: context.changes, marks: "labels")
+      assert cut_text =~ ~s(f_orders__check_1["… ~ check/1"])
     end
 
     test "with `modules`, marks the files and counts the new calls on each arrow", context do
