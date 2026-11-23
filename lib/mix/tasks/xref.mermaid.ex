@@ -50,6 +50,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel`,
       `String.Chars` and `exception/1` are left out, as their calls mostly come from `Kernel`'s functions, string
       interpolation and `raise`. Best with `--from` and a small `--depth`
+    * `--external-only MOD` - `--external`, but only the calls to the module and the modules nested in it
+      (repeatable)
     * `--expanded` / `--collapsed` - opens or collapses every file, not both (a file holding a `--from` or `--to`
       function stays open)
     * `--link TEMPLATE` - makes each function a link: `{path}` (absolute), `{relpath}` (relative to the directory
@@ -96,6 +98,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
           level: :integer,
           all_functions: :boolean,
           external: :boolean,
+          external_only: :keep,
           expanded: :boolean,
           collapsed: :boolean,
           link: :string,
@@ -114,6 +117,12 @@ defmodule Mix.Tasks.Xref.Mermaid do
         ],
         aliases: [o: :output]
       )
+
+    # `--external-only` narrows `--external`, which it turns on.
+    opts =
+      if Keyword.has_key?(opts, :external_only),
+        do: Keyword.put(opts, :external, true),
+        else: opts
 
     check_options!(opts, prefixes)
     output = opts[:output]
@@ -365,6 +374,28 @@ defmodule Mix.Tasks.Xref.Mermaid do
     end
   end
 
+  defp external_only(opts) do
+    for text <- Keyword.get_values(opts, :external_only) do
+      case module_name(text) do
+        {:ok, module} -> module
+        :error -> Mix.raise("Can't read --external-only #{text}: give a module, MOD")
+      end
+    end
+  end
+
+  # Checked over the whole project, as `--exclude` is: a module no slice calls is likely a typo.
+  defp external_only_warnings(project, opts) do
+    called =
+      for {_, callees} <- project.forward,
+          {:external, {module, _, _}} <- callees,
+          into: MapSet.new(),
+          do: inspect(module)
+
+    for module <- external_only(opts),
+        not Enum.any?(called, &Project.module_in?(&1, module)),
+        do: "--external-only #{module} matches no module the project calls"
+  end
+
   defp chart(project, full_project, prefixes, {excludes, names}, opts) do
     snapshot = opts[:since] && read_snapshot!(opts[:since])
     prefixes = Enum.map(prefixes, &relative_prefix!(&1, project, snapshot))
@@ -378,7 +409,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
         prefixes: prefixes,
         from: Enum.flat_map(from, &elem(&1, 1)),
         to: Enum.flat_map(to, &elem(&1, 1))
-      ] ++ Keyword.take(opts, [:depth, :call_paths, :incoming, :all_functions, :external])
+      ] ++
+        Keyword.take(opts, [:depth, :call_paths, :incoming, :all_functions, :external]) ++
+        [external_only: external_only(opts)]
 
     selection = Selection.select(project, selection_opts)
 
@@ -391,7 +424,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
           prefixes: prefixes,
           excludes: excludes,
           excluded_names: names,
-          external: opts[:external] == true
+          external: opts[:external] == true,
+          external_only: external_only(opts)
         )
 
     if path = opts[:changes] do
@@ -420,6 +454,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     {text,
      path_warnings ++
+       external_only_warnings(project, opts) ++
        if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
   end
 

@@ -69,7 +69,7 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--format edges`: instead of a chart, plain text with one sorted line per call (`MyApp.Orders.place/1 ->
   MyApp.Repo.insert/2`, each function named by its lowest arity), for comparing two runs, before and after a
   refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
-  `--call-paths`, `--incoming`, `--exclude`, `--external`, `--public`), and none of the drawing
+  `--call-paths`, `--incoming`, `--exclude`, `--external`, `--external-only`, `--public`), and none of the drawing
   options below or `--overview`; a call through private functions (`--public`) is written `~>`. The default is
   `--format mermaid`.
 - `--modules`: one node per file instead of its functions, labeled with its main module, and one arrow per pair of
@@ -84,6 +84,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   `Kernel`, `String.Chars` and `exception/1` are left out: most of those calls are what `Kernel`'s functions, string
   interpolation and `raise` compile to. Even so, a file's calls into libraries are many: `--external` reads best
   with `--from` and a small `--depth`.
+- `--external-only MOD`: `--external`, but only the calls to the module and the modules nested in it, matched like
+  `--exclude MOD` (`--external-only Ecto` keeps `Ecto.Repo` and `Ecto.Changeset`). Repeatable.
 - `--expanded` / `--collapsed`: opens or collapses every file (a file holding a `--from` or `--to` function always
   stays open).
 - `--link TEMPLATE`: makes each function a link to its source; `{path}` is the URL-encoded absolute path,

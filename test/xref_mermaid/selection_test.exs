@@ -235,6 +235,21 @@ defmodule XrefMermaid.SelectionTest do
     refute Enum.any?(selection.calls, &match?({_, {:external, {:erlang, _, _}}}, &1))
   end
 
+  test "`external_only` keeps the external calls to the modules named, by the parts of their names",
+       %{
+         project: project
+       } do
+    only =
+      &Selection.select(project,
+        prefixes: ["lib/shop/orders.ex"],
+        external: true,
+        external_only: &1
+      )
+
+    assert Map.keys(only.(["Enum"]).externals) == [Enum]
+    assert only.(["Enu"]).externals == %{}
+  end
+
   test "by_file/2 counts the distinct calls between files, and drops the calls within one" do
     project =
       TestProject.build(

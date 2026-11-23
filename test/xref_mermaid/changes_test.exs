@@ -116,6 +116,24 @@ defmodule XrefMermaid.ChangesTest do
     assert changes.removed == %{files: [], functions: ["Shop.Orders.gone/0"], calls: []}
   end
 
+  test "compare/4 with `external_only` counts removed external calls to the modules named only",
+       context do
+    removed_calls = fn only ->
+      Changes.compare(context.project, context.snapshot, context.hashes,
+        prefixes: ["lib/shop/orders.ex"],
+        external: true,
+        external_only: only
+      ).removed.calls
+    end
+
+    assert removed_calls.(["Enum"]) == [
+             "Shop.Orders.gone/0 -> Enum.map/2",
+             "Shop.Orders.gone/0 -> Shop.Old.run/0"
+           ]
+
+    assert removed_calls.(["Enu"]) == ["Shop.Orders.gone/0 -> Shop.Old.run/0"]
+  end
+
   test "compare/4 leaves out of the snapshot the functions `excluded_names` leaves out, and their calls",
        context do
     compare = fn names ->

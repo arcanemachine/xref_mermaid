@@ -15,6 +15,8 @@ defmodule XrefMermaid.Selection do
   only at the end of a call, or as a start function.
   """
 
+  alias XrefMermaid.Project
+
   @doc """
   Returns `%{files: %{file => [key]}, slice_files: MapSet, calls: [{caller, callee}], file_edges: [{source, sink,
   kind}], starts: MapSet, more_callees: MapSet, more_callers: MapSet, externals: %{module => [key]}, file_calls: [],
@@ -25,7 +27,8 @@ defmodule XrefMermaid.Selection do
   Options: `prefixes`, `from`, `to`, `depth` (default 3), `call_paths` (only the calls on a walk from a `from` key
   to a `to` key, at most `depth` calls long, or any length without `depth`; nothing is cut off), `incoming` (also
   the calls into the slice files and the file dependencies on them), `all_functions`, `external` (also calls to
-  Elixir modules outside the project, as leaves).
+  Elixir modules outside the project, as leaves), `external_only` (with `external`, only those to the modules named,
+  as text, matched by `XrefMermaid.Project.module_in?/2`).
   """
   def select(project, opts) do
     prefixes = Keyword.get(opts, :prefixes, [])
@@ -47,12 +50,16 @@ defmodule XrefMermaid.Selection do
 
     ## Calls
 
+    external_only = Keyword.get(opts, :external_only, [])
+
     # Erlang modules, `Kernel`, `String.Chars` and `exception/1` are left out of external calls: most are what
     # `Kernel`'s functions, string interpolation and `raise` compile to.
     keep? = fn
       {:external, {module, name, arity}} ->
         opts[:external] == true and String.starts_with?(Atom.to_string(module), "Elixir.") and
-          module not in [Kernel, String.Chars] and {name, arity} != {:exception, 1}
+          module not in [Kernel, String.Chars] and {name, arity} != {:exception, 1} and
+          (external_only == [] or
+             Enum.any?(external_only, &Project.module_in?(inspect(module), &1)))
 
       _ ->
         true

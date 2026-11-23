@@ -27,6 +27,7 @@ defmodule XrefMermaid.Changes do
       [name], calls: [name]}` for the files whose paths start with one, their functions and the calls those made;
       `nil` without prefixes
     * `:external` - removed calls to modules outside the project count too, as `--external` draws them
+    * `:external_only` - with `:external`, only those to the modules named (`XrefMermaid.Project.module_in?/2`)
     * `:excludes` - path prefixes left out of the project (`XrefMermaid.Project.exclude/2`), left out of the snapshot
       too
     * `:excluded_names` - functions left out of the project (`XrefMermaid.Project.exclude_names/2`), left out of the
@@ -132,12 +133,14 @@ defmodule XrefMermaid.Changes do
           continued,
           out?,
           Keyword.get(opts, :prefixes, []),
-          opts[:external] == true
+          if(opts[:external] == true, do: Keyword.get(opts, :external_only, []))
         )
     }
   end
 
-  defp removed(_project, _snapshot, _functions, _file, _continued, _out?, [], _external), do: nil
+  # `external_only` is `nil` when external calls don't count, or the modules they count for (`[]` for every one).
+  defp removed(_project, _snapshot, _functions, _file, _continued, _out?, [], _external_only),
+    do: nil
 
   defp removed(
          project,
@@ -147,15 +150,16 @@ defmodule XrefMermaid.Changes do
          continued,
          out?,
          prefixes,
-         external
+         external_only
        ) do
     in_scope? = fn file -> Enum.any?(prefixes, &String.starts_with?(file, &1)) end
 
     # An external call counts only when the chart would draw it (`XrefMermaid.Selection.select/2`).
     external? = fn {module, name, arity} ->
-      external and not String.starts_with?(module, ":") and
+      external_only != nil and not String.starts_with?(module, ":") and
         module not in ["Kernel", "String.Chars"] and
-        {name, arity} != {"exception", 1}
+        {name, arity} != {"exception", 1} and
+        (external_only == [] or Enum.any?(external_only, &Project.module_in?(module, &1)))
     end
 
     # Calls from generated functions aren't drawn, so their removal isn't counted.

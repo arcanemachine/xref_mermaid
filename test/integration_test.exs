@@ -205,6 +205,18 @@ defmodule XrefMermaid.IntegrationTest do
     refute text =~ "f_a_b__run_0"
   end
 
+  test "keeps only the external calls to the modules --external-only names", context do
+    {text, _log} = chart(["lib/sample/", "--external-only", "Enum"], context)
+    assert text =~ "--> x_Enum__map_2"
+
+    {text, log} = chart(["lib/sample/", "--external-only", "Enu"], context)
+    refute text =~ "x_Enum"
+    assert log =~ "warning: --external-only Enu matches no module the project calls"
+
+    assert failure(["lib/", "--external-only", "lib/x"], context) =~
+             "Can't read --external-only lib/x: give a module, MOD"
+  end
+
   test "draws only the calls on the walks from --from to --to with --call-paths", context do
     paths = ["--from", "Sample.Orders.receipt", "--to", "Sample.Totals.price", "--call-paths"]
     {text, log} = chart(paths ++ ["--format", "edges"], context)
