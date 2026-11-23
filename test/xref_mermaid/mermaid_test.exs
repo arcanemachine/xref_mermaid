@@ -193,10 +193,11 @@ defmodule XrefMermaid.MermaidTest do
 
     text =
       Mermaid.write(project, Selection.select(project, prefixes: ["lib/"]),
-        link: "x://{path}:{line}"
+        link: "x://{path}:{line} y/{relpath}"
       )
 
-    assert text =~ ~s(href "x:///project/lib/my%20%231%20dir/a%3Fb.ex:3")
+    assert text =~
+             ~s(href "x:///project/lib/my%20%231%20dir/a%3Fb.ex:3 y/lib/my%20%231%20dir/a%3Fb.ex")
   end
 
   test "limit_warnings/1 warns over Mermaid's default limits" do

@@ -23,7 +23,8 @@ defmodule XrefMermaid.Mermaid do
     * `:collapsed` - collapses every file
     * `:all_functions` - collapses the files outside the slice unless `:expanded` (their full function lists are
       long); otherwise every file is open
-    * `:link` - a URL template for a `click` link on each function: `{path}` (absolute, URL-encoded) and `{line}`
+    * `:link` - a URL template for a `click` link on each function: `{path}` (absolute), `{relpath}` (relative to
+      the project root), both URL-encoded, and `{line}`
     * `:legend` - adds a legend subgraph
     * `:details` - adds each function's first `@spec` and the start of its `@doc` to its label
     * `:call_order` - numbers each function's calls in the order its code makes them
@@ -575,12 +576,12 @@ defmodule XrefMermaid.Mermaid do
 
   defp link_line(function, ids, project, template) do
     # Every character but `/` and unreserved ones is encoded, so a `#` or `?` in a path is not a fragment or query.
-    path =
-      URI.encode(Path.join(project.root, function.file), &(URI.char_unreserved?(&1) or &1 == ?/))
+    encode = &URI.encode(&1, fn char -> URI.char_unreserved?(char) or char == ?/ end)
 
     url =
       template
-      |> String.replace("{path}", path)
+      |> String.replace("{path}", encode.(Path.join(project.root, function.file)))
+      |> String.replace("{relpath}", encode.(function.file))
       |> String.replace("{line}", to_string(function.line))
 
     ~s(  click #{ids[function.key]} href "#{url}"\n)

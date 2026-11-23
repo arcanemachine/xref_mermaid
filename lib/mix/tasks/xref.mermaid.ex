@@ -46,8 +46,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       interpolation and `raise`. Best with `--from` and a small `--depth`
     * `--expanded` / `--collapsed` - opens or collapses every file, not both (a file holding a `--from` or `--to`
       function stays open)
-    * `--link TEMPLATE` - makes each function a link: `{path}` (absolute, URL-encoded) and `{line}`, e.g.
-      `vscode://file{path}:{line}`
+    * `--link TEMPLATE` - makes each function a link: `{path}` (absolute), `{relpath}` (relative to the directory
+      the task runs in), both URL-encoded, and `{line}`, e.g. `vscode://file{path}:{line}`
     * `--legend` - adds a legend
     * `--details` - adds each function's first `@spec` and the first paragraph of its `@doc`, cut short
     * `--call-order` - numbers each function's calls in the order its code makes them

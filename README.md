@@ -69,9 +69,13 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   with `--from` and a small `--depth`.
 - `--expanded` / `--collapsed`: opens or collapses every file (a file holding a `--from` or `--to` function always
   stays open).
-- `--link TEMPLATE`: makes each function a link to its source; `{path}` is the URL-encoded absolute path and
-  `{line}` the line, e.g. `vscode://file{path}:{line}`. Mermaid follows links only when the page renders with
-  `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart can't change it).
+- `--link TEMPLATE`: makes each function a link to its source; `{path}` is the URL-encoded absolute path,
+  `{relpath}` the URL-encoded path relative to the directory the task runs in, and `{line}` the line, e.g.
+  `vscode://file{path}:{line}`, or `https://github.com/me/my_app/blob/main/{relpath}#L{line}` for links that work
+  on any machine. When the project sits in a subdirectory of the repository (an umbrella app, say), put that
+  directory in the template: `.../blob/main/apps/my_app/{relpath}#L{line}`. Mermaid follows links only when the
+  page renders with `securityLevel: "loose"` (Mermaid's default is `"strict"`, which turns them off, and a chart
+  can't change it).
 - `--legend`: adds a legend.
 - `--details`: adds two lines under each function's name: its first `@spec` (with `(+N)` when it has more), without
   the name and with module names cut to their last part, and the first paragraph of its `@doc`, each cut to 80
