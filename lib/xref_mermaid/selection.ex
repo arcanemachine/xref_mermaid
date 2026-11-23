@@ -22,9 +22,10 @@ defmodule XrefMermaid.Selection do
   `by_file/3`. `more_callees` holds the functions a `from:` walk reached that make a call not drawn (the depth cut
   it off), and `more_callers` those a `to:` walk reached that get one.
 
-  Options: `prefixes`, `from`, `to`, `depth` (default 3), `incoming` (also the calls into the slice files and the
-  file dependencies on them), `all_functions`, `external` (also calls to Elixir modules outside the project, as
-  leaves).
+  Options: `prefixes`, `from`, `to`, `depth` (default 3), `call_paths` (only the calls on a walk from a `from` key
+  to a `to` key, at most `depth` calls long, or any length without `depth`; nothing is cut off), `incoming` (also
+  the calls into the slice files and the file dependencies on them), `all_functions`, `external` (also calls to
+  Elixir modules outside the project, as leaves).
   """
   def select(project, opts) do
     prefixes = Keyword.get(opts, :prefixes, [])
@@ -57,12 +58,19 @@ defmodule XrefMermaid.Selection do
         true
     end
 
-    depth = Keyword.get(opts, :depth, 3)
-
     from = Keyword.get(opts, :from, [])
     to = Keyword.get(opts, :to, [])
-    from_calls = walk(project.forward, from, depth, keep?, :forward)
-    to_calls = walk(project.backward, to, depth, keep?, :backward)
+    call_paths? = opts[:call_paths] == true
+
+    {from_calls, to_calls} =
+      if call_paths? do
+        {call_paths(project, from, to, opts[:depth]), []}
+      else
+        depth = Keyword.get(opts, :depth, 3)
+
+        {walk(project.forward, from, depth, keep?, :forward),
+         walk(project.backward, to, depth, keep?, :backward)}
+      end
 
     # The slice's own calls (and, with `incoming`, the calls into the slice) are one step from its functions.
     calls =
@@ -75,8 +83,10 @@ defmodule XrefMermaid.Selection do
     # The functions a walk reached that make (or get) a call the chart doesn't draw: those the depth cut off.
     drawn = MapSet.new(calls)
 
+    # Off a call path, a call not drawn isn't cut off by the depth.
     more_callees =
       for key <- MapSet.new(from ++ Enum.map(from_calls, &elem(&1, 1))),
+          not call_paths?,
           not match?({:external, _}, key),
           Enum.any?(Map.get(project.forward, key, []), &(keep?.(&1) and {key, &1} not in drawn)),
           into: MapSet.new(),
@@ -84,6 +94,7 @@ defmodule XrefMermaid.Selection do
 
     more_callers =
       for key <- MapSet.new(to ++ Enum.map(to_calls, &elem(&1, 0))),
+          not call_paths?,
           Enum.any?(Map.get(project.backward, key, []), &({&1, key} not in drawn)),
           into: MapSet.new(),
           do: key
@@ -158,6 +169,40 @@ defmodule XrefMermaid.Selection do
 
       {file, Enum.sort_by(keys, &{project.functions[&1].line, &1})}
     end
+  end
+
+  # The calls on a walk from a `from` key to a `to` key, at most `depth` calls long (any length when `nil`): a call
+  # `{a, b}` is on one when the distance from the `from` keys to `a`, plus one, plus the distance from `b` to the `to`
+  # keys is within `depth`.
+  defp call_paths(project, from, to, depth) do
+    from_distance = distances(project.forward, from)
+    to_distance = distances(project.backward, to)
+
+    for {caller, caller_distance} <- from_distance,
+        callee <- Map.get(project.forward, caller, []),
+        callee_distance = to_distance[callee],
+        callee_distance != nil,
+        depth == nil or caller_distance + 1 + callee_distance <= depth,
+        do: {caller, callee}
+  end
+
+  # The fewest steps over `edges` from any of `seeds` to each key reached.
+  defp distances(edges, seeds) do
+    Stream.iterate(1, &(&1 + 1))
+    |> Enum.reduce_while({Map.new(seeds, &{&1, 0}), seeds}, fn distance, {reached, frontier} ->
+      next =
+        for(
+          from <- frontier,
+          to <- Map.get(edges, from, []),
+          not Map.has_key?(reached, to),
+          do: to
+        )
+        |> Enum.uniq()
+
+      if next == [],
+        do: {:halt, reached},
+        else: {:cont, {Map.merge(reached, Map.new(next, &{&1, distance})), next}}
+    end)
   end
 
   # Breadth-first from `seeds`, `depth` steps, over `edges`: a map from a key to its callees (`:forward`) or callers

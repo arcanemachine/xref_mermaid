@@ -172,6 +172,35 @@ defmodule XrefMermaid.IntegrationTest do
              "Sample.Repo.save/1 is in a file left out by --exclude"
   end
 
+  test "draws only the calls on the walks from --from to --to with --call-paths", context do
+    paths = ["--from", "Sample.Orders.receipt", "--to", "Sample.Totals.price", "--call-paths"]
+    {text, log} = chart(paths ++ ["--format", "edges"], context)
+
+    assert text ==
+             """
+             Sample.Orders.receipt/1 -> Sample.Orders.total/1
+             Sample.Orders.total/1 -> Sample.Totals.total/1
+             Sample.Totals.total/1 -> Sample.Totals.price/1
+             """
+
+    refute log =~ "warning:"
+
+    # A second --from on no path only warns; no path at all stops the task.
+    {_text, log} =
+      chart(paths ++ ["--from", "Sample.Orders.place", "--to", "Sample.Orders.place"], context)
+
+    assert log =~ "warning: --from Sample.Orders.place is on no call path to a --to function"
+    assert log =~ "warning: --to Sample.Orders.place is on no call path from a --from function"
+
+    assert failure(paths ++ ["--depth", "2"], context) =~
+             "No call path from Sample.Orders.receipt to Sample.Totals.price within --depth 2"
+
+    assert failure(["--from", "Sample.Orders.place", "--call-paths"], context) =~
+             "--call-paths needs --from and --to"
+
+    assert failure(paths ++ ["--external"], context) =~ "leave out path prefixes and --external"
+  end
+
   test "writes the calls as plain text with --format edges", context do
     {text, log} = chart(["--from", "Sample.Orders.place/2", "--format", "edges"], context)
 

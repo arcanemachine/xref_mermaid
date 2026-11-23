@@ -26,6 +26,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       `/ARITY` for every arity)
     * `--to MOD.FUN/ARITY` - the calls made to the function, followed up to `--depth` hops back (repeatable)
     * `--depth N` - hops for `--from` and `--to` (default 3)
+    * `--call-paths` - with `--from` and `--to`, only the calls on a walk from a `--from` function to a `--to`
+      function; `--depth` then caps the walk's length (default: any length). Not with path prefixes or `--external`
     * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
     * `--exclude PREFIX` - leaves out the files whose paths start with it, and every call to or from them, in
       every mode (repeatable)
@@ -84,6 +86,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
           from: :keep,
           to: :keep,
           depth: :integer,
+          call_paths: :boolean,
           incoming: :boolean,
           overview: :boolean,
           level: :integer,
@@ -233,6 +236,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
           Enum.any?(
             [
               :depth,
+              :call_paths,
               :incoming,
               :all_functions,
               :external,
@@ -268,6 +272,14 @@ defmodule Mix.Tasks.Xref.Mermaid do
       opts[:incoming] && prefixes == [] ->
         Mix.raise("--incoming goes with path prefixes")
 
+      opts[:call_paths] && !(Keyword.has_key?(opts, :from) and Keyword.has_key?(opts, :to)) ->
+        Mix.raise("--call-paths needs --from and --to")
+
+      opts[:call_paths] && (prefixes != [] or opts[:external]) ->
+        Mix.raise(
+          "--call-paths draws only the walks from --from to --to; leave out path prefixes and --external"
+        )
+
       true ->
         :ok
     end
@@ -299,14 +311,20 @@ defmodule Mix.Tasks.Xref.Mermaid do
     prefixes = Enum.map(prefixes, &relative_prefix!(&1, project, snapshot))
     resolve = &resolve!(project, full_project, &1)
 
+    from = opts |> Keyword.get_values(:from) |> Enum.map(&{&1, resolve.(&1)})
+    to = opts |> Keyword.get_values(:to) |> Enum.map(&{&1, resolve.(&1)})
+
     selection_opts =
       [
         prefixes: prefixes,
-        from: opts |> Keyword.get_values(:from) |> Enum.flat_map(resolve),
-        to: opts |> Keyword.get_values(:to) |> Enum.flat_map(resolve)
-      ] ++ Keyword.take(opts, [:depth, :incoming, :all_functions, :external])
+        from: Enum.flat_map(from, &elem(&1, 1)),
+        to: Enum.flat_map(to, &elem(&1, 1))
+      ] ++ Keyword.take(opts, [:depth, :call_paths, :incoming, :all_functions, :external])
 
     selection = Selection.select(project, selection_opts)
+
+    path_warnings =
+      if opts[:call_paths], do: call_path_warnings!(selection, from, to, opts), else: []
 
     changes =
       snapshot &&
@@ -340,7 +358,29 @@ defmodule Mix.Tasks.Xref.Mermaid do
             Keyword.drop(opts, [:changes]) ++ [changes: changes]
           )
 
-    {text, if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
+    {text, path_warnings ++ if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
+  end
+
+  # No call path at all stops the task; a start function on none of them only warns.
+  defp call_path_warnings!(selection, from, to, opts) do
+    within = if depth = opts[:depth], do: " within --depth #{depth}", else: ""
+
+    if selection.calls == [] do
+      Mix.raise(
+        "No call path from #{Enum.map_join(from, ", ", &elem(&1, 0))} to " <>
+          "#{Enum.map_join(to, ", ", &elem(&1, 0))}#{within}"
+      )
+    end
+
+    callers = MapSet.new(selection.calls, &elem(&1, 0))
+    callees = MapSet.new(selection.calls, &elem(&1, 1))
+
+    for {spec, keys} <- from, not Enum.any?(keys, &(&1 in callers)) do
+      "--from #{spec} is on no call path to a --to function#{within}"
+    end ++
+      for {spec, keys} <- to, not Enum.any?(keys, &(&1 in callees)) do
+        "--to #{spec} is on no call path from a --from function#{within}"
+      end
   end
 
   defp read_snapshot!(path) do

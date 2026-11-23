@@ -21,6 +21,7 @@ From the project to draw. In an umbrella project, from the umbrella root to read
 mix xref.mermaid lib/my_app/orders.ex lib/my_app/orders/ -o orders.mmd   # these files
 mix xref.mermaid --from MyApp.Orders.place/2 --depth 4 -o place.mmd     # what place/2 calls, 4 hops deep
 mix xref.mermaid --to MyApp.Repo.insert -o inserts.mmd                  # what calls insert, at any arity
+mix xref.mermaid --from MyAppWeb.OrderController.create --to MyApp.Repo.insert --call-paths -o how.mmd
 mix xref.mermaid --overview --level 3 -o overview.mmd                   # the project's directories
 mix xref.mermaid lib/my_app/ --since before.snapshot -o change.mmd      # what changed since a --snapshot
 ```
@@ -38,6 +39,10 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--to MOD.FUN/ARITY`: the calls made to the function, followed up to `--depth` hops back. Repeatable.
   `--from` and `--to` name functions of the project (not of its dependencies); an unknown one stops the task and
   names the closest matches.
+- `--call-paths`: with `--from` and `--to`, only the calls on a walk from a `--from` function to a `--to` function:
+  how one reaches the other. `--depth` then caps the walk's length, counted in calls (by default, any length). No
+  call path at all stops the task; a `--from` or `--to` function on none of them only warns. Not with path prefixes
+  or `--external`, and nothing gets the `…` marks.
 - `--exclude PREFIX`: leaves out the files whose paths start with it (matched as text, like path prefixes), and every
   call to or from them, in every mode, `--overview` included. Repeatable. One that matches no file only warns.
 - `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
@@ -53,8 +58,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--format edges`: instead of a chart, plain text with one sorted line per call (`MyApp.Orders.place/1 ->
   MyApp.Repo.insert/2`, each function named by its lowest arity), for comparing two runs, before and after a
   refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
-  `--incoming`, `--exclude`, `--external`), and none of the drawing options below or `--overview`. The default is
-  `--format mermaid`.
+  `--call-paths`, `--incoming`, `--exclude`, `--external`), and none of the drawing options below or `--overview`.
+  The default is `--format mermaid`.
 - `--modules`: one node per file instead of its functions, labeled with its main module, and one arrow per pair of
   files, labeled with the number of distinct function-to-function calls between them (calls within a file drop out).
   It draws what the selection reaches, so a slice of a few dozen files stays readable where its function chart is

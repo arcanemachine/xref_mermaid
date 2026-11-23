@@ -189,6 +189,41 @@ defmodule XrefMermaid.SelectionTest do
     assert {slice.more_callees, slice.more_callers} == {MapSet.new(), MapSet.new()}
   end
 
+  test "`call_paths` keeps only the calls on a walk from a `from` function to a `to` function", %{
+    project: project
+  } do
+    paths =
+      &Selection.select(
+        project,
+        [from: [{Shop.Admin, :retry, 1}], to: [{Shop.Rules, :limit, 0}], call_paths: true] ++ &1
+      )
+
+    shortest = [
+      {{Shop.Admin, :retry, 1}, {Shop.Orders, :place, 1}},
+      {{Shop.Orders, :check, 1}, {Shop.Rules, :allowed?, 1}},
+      {{Shop.Orders, :place, 1}, {Shop.Orders, :check, 1}},
+      {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :limit, 0}}
+    ]
+
+    # `place/1`'s call to `Repo.insert/1` leads nowhere near `limit/0`.
+    assert paths.(depth: 4).calls == shortest
+    assert paths.(depth: 3).calls == []
+
+    # Without a depth, any length: a walk may go round the `allowed?/1`-`again/1` cycle on its way.
+    assert paths.([]).calls ==
+             Enum.sort(
+               shortest ++
+                 [
+                   {{Shop.Rules, :again, 1}, {Shop.Rules, :allowed?, 1}},
+                   {{Shop.Rules, :allowed?, 1}, {Shop.Rules, :again, 1}}
+                 ]
+             )
+
+    # A call off the paths isn't cut off by the depth, so nothing is marked.
+    assert {paths.(depth: 4).more_callees, paths.(depth: 4).more_callers} ==
+             {MapSet.new(), MapSet.new()}
+  end
+
   test "`external` adds Elixir modules outside the project, but not Erlang modules", %{
     project: project
   } do
