@@ -172,6 +172,39 @@ defmodule XrefMermaid.IntegrationTest do
              "Sample.Repo.save/1 is in a file left out by --exclude"
   end
 
+  test "leaves out excluded functions, project or external, and warns on a name that matches nothing",
+       context do
+    args = ["lib/sample/orders.ex", "--external", "--exclude", "Sample.Orders.valid?/1"]
+
+    {text, log} =
+      chart(args ++ ["--exclude", "Enum.map", "--exclude", "Sample.Nope.run"], context)
+
+    assert text =~ "f_orders__valid_b_1"
+    refute text =~ "valid_q"
+    refute text =~ "Enum"
+
+    assert log =~
+             "warning: --exclude Sample.Nope.run matches no function the project defines or calls"
+
+    assert failure(
+             ["--from", "Sample.Orders.valid?", "--exclude", "Sample.Orders.valid?"],
+             context
+           ) =~
+             "Sample.Orders.valid? is left out by --exclude"
+
+    assert failure(["lib/", "--exclude", "Lib/x"], context) =~
+             "Can't read --exclude Lib/x: give a path prefix, MOD.FUN/ARITY, MOD.FUN or MOD"
+  end
+
+  test "leaves out an excluded module and the modules nested in it, by the parts of their names",
+       context do
+    {text, _log} = chart(["lib/sample/orders.ex", "--exclude", "Sample.A"], context)
+
+    # `Sample.AB`, in `a_b.ex`, stays; `Sample.A.B`, in `a/b.ex`, goes.
+    assert text =~ "f_orders__paths_0 --> f_a_b_2__run_0"
+    refute text =~ "f_a_b__run_0"
+  end
+
   test "draws only the calls on the walks from --from to --to with --call-paths", context do
     paths = ["--from", "Sample.Orders.receipt", "--to", "Sample.Totals.price", "--call-paths"]
     {text, log} = chart(paths ++ ["--format", "edges"], context)

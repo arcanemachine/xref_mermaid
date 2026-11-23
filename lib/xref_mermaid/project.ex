@@ -247,6 +247,61 @@ defmodule XrefMermaid.Project do
   end
 
   @doc """
+  Drops the functions `names` match (`name_out?/3`), project or external, and every call to or from them. `names`
+  are `{module, name, arity}` as text (`XrefMermaid.Snapshot.name/1`), with `nil` for every arity, or `{:module,
+  module}` for every function of a module and the modules nested in it.
+  """
+  def exclude_names(project, []), do: project
+
+  def exclude_names(project, names) do
+    out? = fn
+      {:external, {module, name, arity}} ->
+        name_out?(names, {inspect(module), Atom.to_string(name)}, [arity])
+
+      {module, name, _} = key ->
+        name_out?(names, {inspect(module), Atom.to_string(name)}, project.functions[key].arities)
+    end
+
+    functions = Map.reject(project.functions, fn {key, _} -> out?.(key) end)
+
+    keep_calls = fn edges ->
+      for {key, others} <- edges,
+          not out?.(key),
+          others = Enum.reject(others, out?),
+          others != [],
+          into: %{},
+          do: {key, others}
+    end
+
+    %{
+      project
+      | functions: functions,
+        index: Map.filter(project.index, fn {_, key} -> Map.has_key?(functions, key) end),
+        forward: keep_calls.(project.forward),
+        backward: keep_calls.(project.backward)
+    }
+  end
+
+  @doc """
+  Whether one of `names` (as in `exclude_names/2`) matches the function `{module, name}`, as text, with `arities`.
+  """
+  def name_out?(names, {module, name}, arities) do
+    Enum.any?(names, fn
+      {:module, out_module} ->
+        module_in?(module, out_module)
+
+      {out_module, out_name, arity} ->
+        out_module == module and out_name == name and (arity == nil or arity in arities)
+    end)
+  end
+
+  @doc """
+  Whether `module` is `outer` or nested in it, by the parts of their names as text: `Ecto.Changeset` is in `Ecto`,
+  `EctoEnum` isn't.
+  """
+  def module_in?(module, outer), do: module == outer or String.starts_with?(module, outer <> ".")
+
+  @doc """
   Drops the private functions. A public function's calls through private ones become calls of its own, to the
   public functions and external ones they reach, listed in `through_private` unless it also makes them directly.
   Each function's calls keep the order its code first makes them.

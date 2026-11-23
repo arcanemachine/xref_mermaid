@@ -116,6 +116,28 @@ defmodule XrefMermaid.ChangesTest do
     assert changes.removed == %{files: [], functions: ["Shop.Orders.gone/0"], calls: []}
   end
 
+  test "compare/4 leaves out of the snapshot the functions `excluded_names` leaves out, and their calls",
+       context do
+    compare = fn names ->
+      Changes.compare(context.project, context.snapshot, context.hashes,
+        prefixes: ["lib/shop/"],
+        external: true,
+        excluded_names: names
+      ).removed
+    end
+
+    assert compare.([{"Shop.Orders", "gone", nil}]) ==
+             %{files: ["lib/shop/old.ex"], functions: ["Shop.Old.run/0"], calls: []}
+
+    # An external function is matched by the arity it is called with; a project one by any of its arities.
+    assert compare.([{"Enum", "map", 2}, {"Shop.Old", "run", 0}]).calls == []
+
+    assert compare.([{"Enum", "map", 3}]).calls == [
+             "Shop.Orders.gone/0 -> Enum.map/2",
+             "Shop.Orders.gone/0 -> Shop.Old.run/0"
+           ]
+  end
+
   test "compare/4 doesn't read a call into an excluded file as a removed external call",
        context do
     # The project as the task gives it, with the excluded file left out.

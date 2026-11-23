@@ -107,6 +107,47 @@ defmodule XrefMermaid.ProjectTest do
     assert {:error, _} = Project.resolve(project, {Shop.Repo, :insert, 1})
   end
 
+  test "exclude_names/2 drops the functions named, by any arity, and externals by the arity called" do
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1, 2], :def, 2}, {:check, [1], :def, 5}],
+         [
+           {{:place, 1}, {Shop.Orders, :check, 1}},
+           {{:check, 1}, {Enum, :map, 2}},
+           {{:check, 1}, {Enum, :sum, 1}}
+         ]}
+      ])
+
+    project =
+      Project.exclude_names(project, [
+        {"Shop.Orders", "place", 2},
+        {"Enum", "map", 2},
+        {"Enum", "sum", 2}
+      ])
+
+    assert Map.keys(project.functions) == [{Shop.Orders, :check, 1}]
+    assert {:error, _} = Project.resolve(project, {Shop.Orders, :place, 1})
+    assert project.forward == %{{Shop.Orders, :check, 1} => [{:external, {Enum, :sum, 1}}]}
+    assert project.backward == %{{:external, {Enum, :sum, 1}} => [{Shop.Orders, :check, 1}]}
+  end
+
+  test "exclude_names/2 drops a module and the modules nested in it, by the parts of their names" do
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 2}],
+         [
+           {{:place, 1}, {Ecto, :run, 0}},
+           {{:place, 1}, {Ecto.Changeset, :cast, 3}},
+           {{:place, 1}, {EctoEnum, :cast, 1}}
+         ]},
+        {Shop.Orders.Line, "lib/shop/orders/line.ex", [{:describe, [1], :def, 2}], []}
+      ])
+      |> Project.exclude_names([{:module, "Ecto"}, {:module, "Shop.Orders.Line"}])
+
+    assert Map.keys(project.functions) == [{Shop.Orders, :place, 1}]
+    assert project.forward == %{{Shop.Orders, :place, 1} => [{:external, {EctoEnum, :cast, 1}}]}
+  end
+
   test "public_only/1 drops private functions, and turns calls through them into calls of their own" do
     place = {Shop.Orders, :place, 1}
     allowed? = {Shop.Rules, :allowed?, 1}

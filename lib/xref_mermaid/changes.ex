@@ -9,7 +9,7 @@ defmodule XrefMermaid.Changes do
   function is a removed one and an added one.
   """
 
-  alias XrefMermaid.Snapshot
+  alias XrefMermaid.{Project, Snapshot}
 
   defstruct added_files: MapSet.new(),
             added: MapSet.new(),
@@ -29,12 +29,34 @@ defmodule XrefMermaid.Changes do
     * `:external` - removed calls to modules outside the project count too, as `--external` draws them
     * `:excludes` - path prefixes left out of the project (`XrefMermaid.Project.exclude/2`), left out of the snapshot
       too
+    * `:excluded_names` - functions left out of the project (`XrefMermaid.Project.exclude_names/2`), left out of the
+      snapshot too, with every call to or from them
   """
   def compare(project, snapshot, hashes, opts \\ []) do
     excludes = Keyword.get(opts, :excludes, [])
     out? = fn file -> Enum.any?(excludes, &String.starts_with?(file, &1)) end
+    names = Keyword.get(opts, :excluded_names, [])
 
-    before_functions = Enum.reject(snapshot.functions, &out?.(&1.file))
+    named_out =
+      for function <- snapshot.functions,
+          Project.name_out?(names, {function.module, function.name}, function.arities),
+          into: MapSet.new(),
+          do: before_key(function)
+
+    # A callee in no file of the snapshot is external, matched by the arity it is called with.
+    call_out? = fn {caller, {module, name, arity} = callee} ->
+      caller in named_out or callee in named_out or
+        Project.name_out?(names, {module, name}, [arity])
+    end
+
+    snapshot = %{
+      snapshot
+      | calls: Enum.reject(snapshot.calls, call_out?),
+        externals: Enum.reject(snapshot.externals, call_out?)
+    }
+
+    before_functions =
+      Enum.reject(snapshot.functions, &(out?.(&1.file) or before_key(&1) in named_out))
 
     # Every earlier function's file, excluded ones too, so a call into an excluded file is told from an external one.
     before_file = Map.new(snapshot.functions, &{before_key(&1), &1.file})

@@ -30,7 +30,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
       function; `--depth` then caps the walk's length (default: any length). Not with path prefixes or `--external`
     * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
     * `--exclude PREFIX` - leaves out the files whose paths start with it, and every call to or from them, in
-      every mode (repeatable)
+      every mode (repeatable); `--exclude MOD.FUN/ARITY` (or `MOD.FUN`) leaves out a function instead, of the
+      project or external, and `--exclude MOD` a module and the modules nested in it
     * `--public` - hides private functions; a public function's calls through them become dotted arrows to what
       they reach. Not with `--modules` or `--since`
     * `--modules` - one node per file instead of its functions, labeled with its main module, and one arrow per
@@ -124,15 +125,15 @@ defmodule Mix.Tasks.Xref.Mermaid do
     # The check runs before compiling, which prunes the code path of the applications the check uses.
     version_warnings = VersionCheck.warnings()
     {full_project, warnings} = Project.load(details: opts[:details] == true)
-    {excludes, exclude_warnings} = excludes(full_project, opts)
-    project = Project.exclude(full_project, excludes)
+    {excludes, names, exclude_warnings} = excludes(full_project, opts)
+    project = full_project |> Project.exclude(excludes) |> Project.exclude_names(names)
     project = if opts[:public], do: Project.public_only(project), else: project
 
     {text, chart_warnings} =
       cond do
         opts[:snapshot] -> {Snapshot.write(project), []}
         opts[:overview] -> {overview(project, opts), []}
-        true -> chart(project, full_project, prefixes, excludes, opts)
+        true -> chart(project, full_project, prefixes, {excludes, names}, opts)
       end
 
     write!(output, text)
@@ -303,22 +304,68 @@ defmodule Mix.Tasks.Xref.Mermaid do
     |> Mermaid.write_overview(Keyword.take(opts, [:direction]))
   end
 
-  # An exclusion that matches no file only warns: the same exclusions are often reused across runs.
+  # Path prefixes, and for a value starting with a capital letter, a function (`{module, name, arity}` as text) or a
+  # module (`{:module, module}`).
+  # An exclusion that matches nothing only warns: the same exclusions are often reused across runs.
   defp excludes(project, opts) do
-    opts
-    |> Keyword.get_values(:exclude)
-    |> Enum.map(fn prefix ->
-      relative = relative_prefix(prefix, project)
+    {names, prefixes} =
+      opts
+      |> Keyword.get_values(:exclude)
+      |> Enum.split_with(&match?(<<first, _::binary>> when first in ?A..?Z, &1))
 
-      if matches_file?(project, relative),
-        do: {relative, nil},
-        else: {relative, "--exclude #{prefix} matches no file of the project"}
-    end)
-    |> Enum.unzip()
-    |> then(fn {excludes, warnings} -> {excludes, Enum.reject(warnings, &is_nil/1)} end)
+    names =
+      Enum.map(names, fn spec ->
+        case {Project.parse_spec(spec), module_name(spec)} do
+          {{:ok, {module, name, arity}}, _} ->
+            {spec, {inspect(module), Atom.to_string(name), arity}}
+
+          {:error, {:ok, module}} ->
+            {spec, {:module, module}}
+
+          {:error, :error} ->
+            Mix.raise(
+              "Can't read --exclude #{spec}: give a path prefix, MOD.FUN/ARITY, MOD.FUN or MOD"
+            )
+        end
+      end)
+
+    relatives = Enum.map(prefixes, &{&1, relative_prefix(&1, project)})
+
+    called =
+      for {_, callees} <- project.forward,
+          {:external, {module, name, arity}} <- callees,
+          uniq: true do
+        {{inspect(module), Atom.to_string(name)}, [arity]}
+      end
+
+    functions =
+      for {_, f} <- project.functions,
+          do: {{inspect(f.module), Atom.to_string(f.name)}, f.arities}
+
+    warnings =
+      for(
+        {prefix, relative} <- relatives,
+        not matches_file?(project, relative),
+        do: "--exclude #{prefix} matches no file of the project"
+      ) ++
+        for {spec, name} <- names,
+            not Enum.any?(functions ++ called, fn {function, arities} ->
+              Project.name_out?([name], function, arities)
+            end),
+            do: "--exclude #{spec} matches no function the project defines or calls"
+
+    {Enum.map(relatives, &elem(&1, 1)), Enum.map(names, &elem(&1, 1)), warnings}
   end
 
-  defp chart(project, full_project, prefixes, excludes, opts) do
+  # A module name read as Elixir reads it, as text: `{:ok, "MyApp.Orders"}` or `:error`.
+  defp module_name(text) do
+    case Code.string_to_quoted(text) do
+      {:ok, {:__aliases__, _, parts}} when is_list(parts) -> {:ok, inspect(Module.concat(parts))}
+      _ -> :error
+    end
+  end
+
+  defp chart(project, full_project, prefixes, {excludes, names}, opts) do
     snapshot = opts[:since] && read_snapshot!(opts[:since])
     prefixes = Enum.map(prefixes, &relative_prefix!(&1, project, snapshot))
     resolve = &resolve!(project, full_project, &1, opts[:public] == true)
@@ -343,6 +390,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
         Changes.compare(project, snapshot, Source.hashes(project, Map.keys(selection.files)),
           prefixes: prefixes,
           excludes: excludes,
+          excluded_names: names,
           external: opts[:external] == true
         )
 
@@ -370,7 +418,9 @@ defmodule Mix.Tasks.Xref.Mermaid do
             Keyword.drop(opts, [:changes]) ++ [changes: changes]
           )
 
-    {text, path_warnings ++ if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
+    {text,
+     path_warnings ++
+       if(snapshot, do: Changes.warnings(project, snapshot), else: [])}
   end
 
   # No call path at all stops the task; a start function on none of them only warns.
@@ -450,10 +500,18 @@ defmodule Mix.Tasks.Xref.Mermaid do
       {:error, message} ->
         with {:ok, parsed} <- Project.parse_spec(spec),
              {:ok, keys} <- Project.resolve(full_project, parsed) do
-          if public? and
-               Enum.all?(keys, &(full_project.functions[&1].kind in [:defp, :defmacrop])),
-             do: Mix.raise("#{spec} is private, and --public leaves out private functions"),
-             else: Mix.raise("#{spec} is in a file left out by --exclude")
+          functions = Enum.map(keys, &full_project.functions[&1])
+
+          cond do
+            public? and Enum.all?(functions, &(&1.kind in [:defp, :defmacrop])) ->
+              Mix.raise("#{spec} is private, and --public leaves out private functions")
+
+            Enum.all?(functions, &Map.has_key?(project.file_edges, &1.file)) ->
+              Mix.raise("#{spec} is left out by --exclude")
+
+            true ->
+              Mix.raise("#{spec} is in a file left out by --exclude")
+          end
         end
 
         Mix.raise(message)

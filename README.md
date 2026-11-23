@@ -45,6 +45,13 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   or `--external`, and nothing gets the `…` marks.
 - `--exclude PREFIX`: leaves out the files whose paths start with it (matched as text, like path prefixes), and every
   call to or from them, in every mode, `--overview` included. Repeatable. One that matches no file only warns.
+- `--exclude MOD.FUN/ARITY`: a value starting with a capital letter is a function instead: it leaves out that
+  function, of the project (by any of its arities) or external (`Enum.map/2`), and every call to or from it. Leave
+  out `/ARITY` for every arity. For a function many calls go through, such as a logging helper. `--exclude MOD`
+  leaves out a module and the modules nested in it, by the parts of their names: `--exclude Ecto` takes out
+  `Ecto.Changeset` but not `EctoEnum`. Repeatable; with `--external`, a way to drop noisy libraries (`--exclude
+  Enum --exclude Logger`). One that matches no function the project defines or calls only warns. It has no effect
+  on `--overview`, which draws no functions.
 - `--public`: hides private functions, for a chart of a module's API. A public function's calls through its private
   ones become dotted arrows (`-.->`) to the public and external functions they reach; a call it also makes directly
   stays a plain arrow. `--depth` then counts calls between public functions, and `--from` and `--to` take only public
@@ -62,8 +69,9 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--format edges`: instead of a chart, plain text with one sorted line per call (`MyApp.Orders.place/1 ->
   MyApp.Repo.insert/2`, each function named by its lowest arity), for comparing two runs, before and after a
   refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
-  `--call-paths`, `--incoming`, `--exclude`, `--external`, `--public`), and none of the drawing options below or
-  `--overview`; a call through private functions (`--public`) is written `~>`. The default is `--format mermaid`.
+  `--call-paths`, `--incoming`, `--exclude`, `--external`, `--public`), and none of the drawing
+  options below or `--overview`; a call through private functions (`--public`) is written `~>`. The default is
+  `--format mermaid`.
 - `--modules`: one node per file instead of its functions, labeled with its main module, and one arrow per pair of
   files, labeled with the number of distinct function-to-function calls between them (calls within a file drop out).
   It draws what the selection reaches, so a slice of a few dozen files stays readable where its function chart is
