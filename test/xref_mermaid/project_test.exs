@@ -107,6 +107,43 @@ defmodule XrefMermaid.ProjectTest do
     assert {:error, _} = Project.resolve(project, {Shop.Repo, :insert, 1})
   end
 
+  test "public_only/1 drops private functions, and turns calls through them into calls of their own" do
+    place = {Shop.Orders, :place, 1}
+    allowed? = {Shop.Rules, :allowed?, 1}
+    insert = {Shop.Repo, :insert, 1}
+    map = {:external, {Enum, :map, 2}}
+
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex",
+         [{:place, [1], :def, 2}, {:check, [1], :defp, 5}, {:log, [1], :defp, 8}],
+         [
+           {{:place, 1}, {Shop.Orders, :check, 1}},
+           {{:place, 1}, {Shop.Repo, :insert, 1}},
+           {{:place, 1}, {Shop.Orders, :log, 1}},
+           {{:check, 1}, {Shop.Rules, :allowed?, 1}},
+           {{:check, 1}, {Shop.Orders, :log, 1}},
+           {{:check, 1}, {Enum, :map, 2}},
+           {{:log, 1}, {Shop.Orders, :check, 1}},
+           {{:log, 1}, {Shop.Repo, :insert, 1}},
+           {{:log, 1}, {Shop.Orders, :place, 1}}
+         ]},
+        {Shop.Rules, "lib/shop/rules.ex", [{:allowed?, [1], :def, 2}], []},
+        {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}], []}
+      ])
+      |> Project.public_only()
+
+    assert Map.keys(project.functions) |> Enum.sort() == Enum.sort([place, allowed?, insert])
+    assert {:error, _} = Project.resolve(project, {Shop.Orders, :check, 1})
+
+    # In the order the code first reaches each, round the `check/1`-`log/1` cycle once: `allowed?/1`, then `log/1`'s
+    # `insert/1`, then `map/2`. `log/1`'s call back to `place/1` is a call to itself, dropped; `insert/1` is also a
+    # direct call, so not through a private one.
+    assert project.forward == %{place => [allowed?, insert, map]}
+    assert project.backward == %{allowed? => [place], map => [place], insert => [place]}
+    assert project.through_private == MapSet.new([{place, allowed?}, {place, map}])
+  end
+
   test "cycle_groups/1 groups the files on a cycle of calls between files" do
     project =
       TestProject.build([

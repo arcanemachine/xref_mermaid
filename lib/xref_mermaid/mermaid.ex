@@ -129,9 +129,11 @@ defmodule XrefMermaid.Mermaid do
       Enum.map(roots, &render_dir(&1, 1, context)),
       render_externals(externals, ids),
       Enum.map(selection.calls, fn {caller, callee} = call ->
+        arrow = if call in project.through_private, do: "-.->", else: "-->"
+
         case call_label.(call, call_numbers[call]) do
-          nil -> "  #{ids[caller]} --> #{ids[callee]}\n"
-          label -> "  #{ids[caller]} -->|#{label}| #{ids[callee]}\n"
+          nil -> "  #{ids[caller]} #{arrow} #{ids[callee]}\n"
+          label -> "  #{ids[caller]} #{arrow}|#{label}| #{ids[callee]}\n"
         end
       end),
       Enum.map(selection.file_calls, fn {source, sink, count} ->
@@ -156,7 +158,15 @@ defmodule XrefMermaid.Mermaid do
           module_legend(change_legend(opts, colors?, labels?, removed))
 
         true ->
-          legend([cut_legend(selection, opts), change_legend(opts, colors?, labels?, removed)])
+          legend([
+            cut_legend(selection, opts),
+            change_legend(opts, colors?, labels?, removed),
+            if(MapSet.size(project.through_private) > 0,
+              do:
+                ~s(    legend_through["caller"] -.-> legend_through_called["called through private functions"]\n),
+              else: ""
+            )
+          ])
       end,
       # A node has one fill: a file's added or changed mark replaces the slice's.
       case Enum.filter(

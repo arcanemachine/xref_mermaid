@@ -319,6 +319,34 @@ defmodule XrefMermaid.MermaidTest do
     assert text =~ "f_orders__place_1 -->|1| f_orders__b_0\n"
   end
 
+  test "write/3 draws a call through private functions as a dotted arrow, in call order, with a legend line" do
+    project =
+      TestProject.build([
+        {Shop.Orders, "lib/shop/orders.ex", [{:place, [1], :def, 2}, {:check, [1], :defp, 5}],
+         [
+           {{:place, 1}, {Shop.Orders, :check, 1}},
+           {{:place, 1}, {Shop.A.B, :run, 0}},
+           {{:check, 1}, {Shop.Repo, :insert, 1}}
+         ]},
+        {Shop.Repo, "lib/shop/repo.ex", [{:insert, [1], :def, 2}], []},
+        {Shop.A.B, "lib/shop/a/b.ex", [{:run, [0], :def, 2}], []}
+      ])
+      |> XrefMermaid.Project.public_only()
+
+    text =
+      Mermaid.write(project, Selection.select(project, prefixes: ["lib/shop/orders.ex"]),
+        call_order: true,
+        legend: true
+      )
+
+    assert text =~ "  f_orders__place_1 -.->|1| f_repo__insert_1\n"
+    assert text =~ "  f_orders__place_1 -->|2| f_a_b__run_0\n"
+    refute text =~ "check"
+
+    assert text =~
+             ~s(legend_through["caller"] -.-> legend_through_called["called through private functions"])
+  end
+
   test "write/3 names operator characters in ids" do
     project =
       TestProject.build([{Ops, "lib/ops.ex", [{:<~>, [2], :def, 1}, {:"<|>", [2], :def, 2}], []}])

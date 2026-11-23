@@ -9,6 +9,8 @@ defmodule XrefMermaid.Project do
   `modules_in` maps each file to its modules, the main one first: the one named after the file (`MyApp.Orders` in
   `lib/my_app/orders.ex`), or else the first one defined in it, a protocol implementation only when nothing else
   is there.
+
+  `through_private` holds the calls that `public_only/1` made from calls through private functions.
   """
 
   alias XrefMermaid.{Beam, DotGraph}
@@ -20,7 +22,8 @@ defmodule XrefMermaid.Project do
             modules: %{},
             modules_in: %{},
             forward: %{},
-            backward: %{}
+            backward: %{},
+            through_private: MapSet.new()
 
   @doc """
   Compiles the current Mix project and reads its file graph (`mix xref graph`) and its compiled modules. At an
@@ -240,6 +243,63 @@ defmodule XrefMermaid.Project do
         modules_in: Map.reject(project.modules_in, fn {file, _} -> out?.(file) end),
         forward: keep_calls.(project.forward),
         backward: keep_calls.(project.backward)
+    }
+  end
+
+  @doc """
+  Drops the private functions. A public function's calls through private ones become calls of its own, to the
+  public functions and external ones they reach, listed in `through_private` unless it also makes them directly.
+  Each function's calls keep the order its code first makes them.
+  """
+  def public_only(project) do
+    private? = fn key ->
+      function = project.functions[key]
+      function != nil and function.kind in [:defp, :defmacrop]
+    end
+
+    functions = Map.reject(project.functions, fn {key, _} -> private?.(key) end)
+
+    # `{callee, through_private?}` in the order the code first reaches each, depth first through private functions.
+    reach = fn reach, callees, through?, seen ->
+      Enum.flat_map_reduce(callees, seen, fn callee, seen ->
+        cond do
+          not private?.(callee) ->
+            {[{callee, through?}], seen}
+
+          callee in seen ->
+            {[], seen}
+
+          true ->
+            reach.(reach, Map.get(project.forward, callee, []), true, MapSet.put(seen, callee))
+        end
+      end)
+    end
+
+    reached =
+      for {caller, callees} <- project.forward, Map.has_key?(functions, caller), into: %{} do
+        {pairs, _} = reach.(reach, callees, false, MapSet.new())
+        {caller, Enum.reject(pairs, &(elem(&1, 0) == caller))}
+      end
+
+    calls =
+      for {caller, pairs} <- reached,
+          callee <- pairs |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
+          do: {caller, callee}
+
+    through_private =
+      for {caller, pairs} <- reached,
+          {callee, true} <- pairs,
+          {callee, false} not in pairs,
+          into: MapSet.new(),
+          do: {caller, callee}
+
+    %{
+      project
+      | functions: functions,
+        index: Map.filter(project.index, fn {_, key} -> Map.has_key?(functions, key) end),
+        forward: Enum.group_by(calls, &elem(&1, 0), &elem(&1, 1)),
+        backward: Enum.group_by(calls, &elem(&1, 1), &elem(&1, 0)),
+        through_private: through_private
     }
   end
 

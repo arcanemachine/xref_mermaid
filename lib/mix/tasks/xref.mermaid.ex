@@ -31,6 +31,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
     * `--incoming` - also the calls into the path slice and the files that depend on it (with path prefixes)
     * `--exclude PREFIX` - leaves out the files whose paths start with it, and every call to or from them, in
       every mode (repeatable)
+    * `--public` - hides private functions; a public function's calls through them become dotted arrows to what
+      they reach. Not with `--modules` or `--since`
     * `--modules` - one node per file instead of its functions, labeled with its main module, and one arrow per
       pair of files, labeled with the number of distinct function-to-function calls between them
     * `--overview` - instead of all the above; takes only `--level` (default 2), `--exclude` and `--direction`: one
@@ -40,7 +42,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
     * `-o`, `--output` - the file to write (required)
     * `--format FORMAT` - `mermaid` (the default) or `edges`: plain text, one sorted line per call
-      (`Mod.fun/arity -> Mod.fun/arity`), for diffing; it takes none of the options below but `--external`
+      (`Mod.fun/arity -> Mod.fun/arity`, `~>` through private functions with `--public`), for diffing; it
+      takes none of the options below but `--external`
     * `--all-functions` - every non-generated function of every shown file, not just the ones calls reach
       (with path prefixes, files outside the slice start collapsed)
     * `--external` - also calls to Elixir modules outside the project, as leaves; Erlang modules, `Kernel`,
@@ -95,6 +98,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
           expanded: :boolean,
           collapsed: :boolean,
           link: :string,
+          public: :boolean,
           legend: :boolean,
           details: :boolean,
           call_order: :boolean,
@@ -122,6 +126,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
     {full_project, warnings} = Project.load(details: opts[:details] == true)
     {excludes, exclude_warnings} = excludes(full_project, opts)
     project = Project.exclude(full_project, excludes)
+    project = if opts[:public], do: Project.public_only(project), else: project
 
     {text, chart_warnings} =
       cond do
@@ -226,6 +231,12 @@ defmodule Mix.Tasks.Xref.Mermaid do
             "and --call-order"
         )
 
+      opts[:public] && opts[:modules] ->
+        Mix.raise("--modules draws no functions; leave out --public")
+
+      opts[:public] && opts[:since] ->
+        Mix.raise("--public doesn't go with --since")
+
       opts[:expanded] && opts[:collapsed] ->
         Mix.raise("Give --expanded or --collapsed, not both")
 
@@ -243,6 +254,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
               :expanded,
               :collapsed,
               :link,
+              :public,
               :legend,
               :details,
               :call_order
@@ -309,7 +321,7 @@ defmodule Mix.Tasks.Xref.Mermaid do
   defp chart(project, full_project, prefixes, excludes, opts) do
     snapshot = opts[:since] && read_snapshot!(opts[:since])
     prefixes = Enum.map(prefixes, &relative_prefix!(&1, project, snapshot))
-    resolve = &resolve!(project, full_project, &1)
+    resolve = &resolve!(project, full_project, &1, opts[:public] == true)
 
     from = opts |> Keyword.get_values(:from) |> Enum.map(&{&1, resolve.(&1)})
     to = opts |> Keyword.get_values(:to) |> Enum.map(&{&1, resolve.(&1)})
@@ -426,8 +438,8 @@ defmodule Mix.Tasks.Xref.Mermaid do
   defp matches_file?(project, prefix),
     do: Enum.any?(Map.keys(project.file_edges), &String.starts_with?(&1, prefix))
 
-  # `full_project` is the project before `--exclude`, to say when a function is missing because it was excluded.
-  defp resolve!(project, full_project, spec) do
+  # `full_project` is the project before `--exclude` and `--public`, to say why a function is missing.
+  defp resolve!(project, full_project, spec, public?) do
     with {:ok, parsed} <- Project.parse_spec(spec),
          {:ok, keys} <- Project.resolve(project, parsed) do
       keys
@@ -437,8 +449,11 @@ defmodule Mix.Tasks.Xref.Mermaid do
 
       {:error, message} ->
         with {:ok, parsed} <- Project.parse_spec(spec),
-             {:ok, _} <- Project.resolve(full_project, parsed) do
-          Mix.raise("#{spec} is in a file left out by --exclude")
+             {:ok, keys} <- Project.resolve(full_project, parsed) do
+          if public? and
+               Enum.all?(keys, &(full_project.functions[&1].kind in [:defp, :defmacrop])),
+             do: Mix.raise("#{spec} is private, and --public leaves out private functions"),
+             else: Mix.raise("#{spec} is in a file left out by --exclude")
         end
 
         Mix.raise(message)

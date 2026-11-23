@@ -201,6 +201,19 @@ defmodule XrefMermaid.IntegrationTest do
     assert failure(paths ++ ["--external"], context) =~ "leave out path prefixes and --external"
   end
 
+  test "hides private functions with --public", context do
+    {text, _log} = chart(["lib/sample/orders.ex", "--public", "--legend"], context)
+
+    assert text =~ "f_orders__place_1 --> f_repo__save_1"
+    refute text =~ "finish"
+    refute text =~ " private\n"
+
+    assert failure(["--from", "Sample.Orders.finish", "--public"], context) =~
+             "Sample.Orders.finish is private, and --public leaves out private functions"
+
+    assert failure(["lib/", "--public", "--modules"], context) =~ "leave out --public"
+  end
+
   test "writes the calls as plain text with --format edges", context do
     {text, log} = chart(["--from", "Sample.Orders.place/2", "--format", "edges"], context)
 

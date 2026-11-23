@@ -45,6 +45,10 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
   or `--external`, and nothing gets the `…` marks.
 - `--exclude PREFIX`: leaves out the files whose paths start with it (matched as text, like path prefixes), and every
   call to or from them, in every mode, `--overview` included. Repeatable. One that matches no file only warns.
+- `--public`: hides private functions, for a chart of a module's API. A public function's calls through its private
+  ones become dotted arrows (`-.->`) to the public and external functions they reach; a call it also makes directly
+  stays a plain arrow. `--depth` then counts calls between public functions, and `--from` and `--to` take only public
+  ones. Not with `--modules` or `--since`.
 - `--incoming`: also the calls into the slice, and the files that depend on it (needs path prefixes).
 - `--overview`: instead, one node per directory `--level` deep (default 2: `lib/my_app/`), with an arrow per pair of
   directories labeled with the strongest dependency kind and the number of file dependencies. A file goes with the
@@ -58,8 +62,8 @@ Path prefixes, `--from` and `--to` combine: the chart shows everything they reac
 - `--format edges`: instead of a chart, plain text with one sorted line per call (`MyApp.Orders.place/1 ->
   MyApp.Repo.insert/2`, each function named by its lowest arity), for comparing two runs, before and after a
   refactor, without drawing them. It takes what picks the calls (path prefixes, `--from`, `--to`, `--depth`,
-  `--call-paths`, `--incoming`, `--exclude`, `--external`), and none of the drawing options below or `--overview`.
-  The default is `--format mermaid`.
+  `--call-paths`, `--incoming`, `--exclude`, `--external`, `--public`), and none of the drawing options below or
+  `--overview`; a call through private functions (`--public`) is written `~>`. The default is `--format mermaid`.
 - `--modules`: one node per file instead of its functions, labeled with its main module, and one arrow per pair of
   files, labeled with the number of distinct function-to-function calls between them (calls within a file drop out).
   It draws what the selection reaches, so a slice of a few dozen files stays readable where its function chart is
@@ -150,9 +154,10 @@ without `git`).
   module named after the file, or else the first one defined; functions of the others are labeled with their module
   (`Line.describe/1`), and functions of a protocol implementation with the protocol and type
   (`[impl Inspect for Line] inspect/2`, or `[impl String.Chars] to_string/1` for the main module's own).
-- `-->` is a call. A red one is on a cycle of calls between files (over the whole project, not only the part
-  drawn), and a thick one goes to a parent module (`MyApp.Orders.Line` to `MyApp.Orders` or `MyApp`, by each file's
-  main module): the calls worth a second look. With `--modules`, the same marks are on the arrows between files.
+- `-->` is a call; with `--public`, `-.->` (dotted, unlabeled) is a call through private functions. A red one is
+  on a cycle of calls between files (over the whole project, not only the part drawn), and a thick one goes to a
+  parent module (`MyApp.Orders.Line` to `MyApp.Orders` or `MyApp`, by each file's main module): the calls worth a
+  second look. With `--modules`, the same marks are on the arrows between files.
 - A file dependency with no call behind it (a struct, a compile-time use) is a labeled arrow between the files:
   `== compile ==>`, `-. export .->` or `-. runtime .->`.
 - Node ids are internal: the same file or function can get a different id in another chart (they leave out the
