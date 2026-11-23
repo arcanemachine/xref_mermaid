@@ -10,7 +10,8 @@ file, and where the two differ, the local file wins.
 - `lib/mix/tasks/xref.mermaid.ex`: the task; parses and checks options, then runs the three modules below.
 - `lib/xref_mermaid/project.ex`: loads the project (`mix xref graph` through `dot_graph.ex`, functions and calls from
   `.beam` debug info through `beam.ex`) into one model, independent of any chart; at an umbrella root, every app.
-- `lib/xref_mermaid/selection.ex`: picks what to draw (path slices, `--from`/`--to` walks, the file-level selection
+  It also narrows the model before selection (`--exclude`, `--public`).
+- `lib/xref_mermaid/selection.ex`: picks what to draw (path slices, `--from`/`--to` walks and `--call-paths`, the file-level selection
   of `--modules`, the overview).
 - `lib/xref_mermaid/mermaid.ex`: writes a selection as Mermaid text (ids, labels, classes, collapse lines, links, the cycle
   and parent-module marks).
